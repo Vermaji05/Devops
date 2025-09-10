@@ -1,0 +1,129 @@
+DECLARE @TenantId VARCHAR(100) = '${Common.tenantname}';
+DECLARE @TenantName VARCHAR(100) = '${Common.tenantname} ${common.environment}';
+DECLARE @TenantPodId int = $(PodId);
+DECLARE @EmailDomain VARCHAR(100) = '${common.customerdomain}';
+SET @EmailDomain = REPLACE(@EmailDomain, 'test', '')
+DECLARE @AdminUserEmailList VARCHAR(100) = 'DL-TEAM-TTWS-FRON-ADMIN@trintech.com';
+DECLARE @OperatorUserEmailList VARCHAR(100) = 'DL-TEAM-TTWS-FRON-SUPPORT@trintech.com';
+DECLARE @SSO VARCHAR(100) = '${frontier.sso.enabled}'
+DECLARE @isSSO int;
+IF(@SSO = 'TRUE')
+BEGIN
+	SET @isSSO = 1
+END
+ELSE
+BEGIN
+	SET @isSSO = 0
+END
+
+-- Enter License counts
+DECLARE @FrontAdminLicenses int = ${frontier.licenses};
+DECLARE @FrontFrontWebLicenses int = ${frontier.licenses};
+DECLARE @FrontFrontTMLicenses int = ${frontier.licenses};
+DECLARE @FrontFileManagerLicenses int = ${frontier.licenses};
+DECLARE @FrontUserManagerLicenses int = 5;
+
+DECLARE @OrganizationId VARCHAR(100) = @TenantId ;
+DECLARE @Organization VARCHAR(100) = @TenantId + '.com';
+
+-- Details for default users --- 
+-- Trintech Admin(fron.admin)
+DECLARE @AdminUsername  VARCHAR(100)  = CONCAT('fron.admin', '@', @Organization);
+DECLARE @AdminUserSamId VARCHAR(100)  = CONCAT('FA', '#', @OrganizationId);
+DECLARE @AdminUserEmail VARCHAR(100)  = @AdminUserEmailList;
+DECLARE @AdminUserFName VARCHAR(100)  = 'Frontier';
+DECLARE @AdminUserLName VARCHAR(100)  = 'Admin_' + @TenantId;
+-- Trintech Operations user(Trintech.oper)
+DECLARE @OperatorUsername  VARCHAR(100)  = CONCAT('trintech.support', '@', @Organization);
+DECLARE @OperatorUserSamId VARCHAR(100)  = CONCAT('TS', '#', @OrganizationId);
+DECLARE @OperatorUserEmail VARCHAR(100)  = @OperatorUserEmailList;
+DECLARE @OperatorUserFName VARCHAR(100)  = 'Trintech';
+DECLARE @OperatorUserLName VARCHAR(100)  = 'Support_' + @TenantId;
+DECLARE @Count integer;
+
+select @Count = count(*) from Organization Where OrganizationId = @OrganizationId
+if( @Count = 0 )
+begin
+	Insert into Organization (OrganizationId, OrgName) values (@OrganizationId, @Organization);		
+end
+select @Count = count(*) from Tenant Where TenantId = @TenantId
+if( @Count = 0 )
+begin
+	Insert into Tenant (TenantId, OrganizationId, Name, IsSSO) values (@TenantId, @OrganizationId, @TenantName, @isSSO);
+end
+select @Count = count(*) from EmailDomain Where TenantId = @TenantId
+if( @Count = 0 )
+begin
+	Insert into EmailDomain(TenantId, EmailDomain) Select @TenantId, '@' + TRIM(value) FROM STRING_SPLIT(@EmailDomain, ',');
+	Insert into EmailDomain(TenantId, EmailDomain) values (@TenantId, '@trintech.com');
+end
+
+select @Count = count(*) from TenantAppFamilyPod Where TenantId = @TenantId
+if( @Count = 0 )
+begin
+	insert into TenantAppFamilyPod (TenantId, AppFamilyId, PodId) values ( @TenantId, 'Frontier', @TenantPodId);
+	insert into TenantAppFamilyPod (TenantId, AppFamilyId, PodId) values ( @TenantId, 'Workspace', 1);  -- Workspace is always on POD 1
+end
+
+select @Count = count(*) from PortalUser Where TenantId = @TenantId
+if( @Count = 0 )
+begin
+	-- Create Admin user --
+	if( @isSSO = 0 )
+	begin
+		Insert into PortalUser (UserName, SAMId, TenantId, FirstName, LastName, OrganizationId, Email, PasswordExpDate, PasswordReset, CreateDate, PasswordUpdateDate, SystemUser)
+		values (@AdminUsername, @AdminUserSamId, @TenantId, @AdminUserFName, @AdminUserLName, @OrganizationId, @AdminUserEmail, '2099-12-31', 0, GETUTCDATE(), GETUTCDATE(), 1);
+	end
+	else
+	begin
+		Insert into PortalUser (UserName, SAMId, TenantId, FirstName, LastName, OrganizationId, Email, PasswordExpDate, PasswordReset, CreateDate, PasswordUpdateDate, SystemUser)
+		values (@AdminUsername, @AdminUserSamId, @TenantId, @AdminUserFName, @AdminUserLName, @OrganizationId, @AdminUserEmail, '2099-12-31', 0,  GETUTCDATE(), GETUTCDATE(), 1);
+	end
+
+	-- Create operations user ---
+	if( @isSSO = 0 )
+	begin
+		Insert into PortalUser (UserName, SAMId, TenantId, FirstName, LastName, OrganizationId, Email, PasswordExpDate, PasswordReset, CreateDate, PasswordUpdateDate, SystemUser)
+		values (@OperatorUsername, @OperatorUserSamId, @TenantId, @OperatorUserFName, @OperatorUserLName,  @OrganizationId,        @OperatorUserEmailList,     '2099-12-31',        0,           GETUTCDATE(),   GETUTCDATE(),      1   ) ;
+	end
+	else
+	begin
+		Insert into PortalUser (    UserName,          SAMId,             TenantId,      FirstName,          LastName,            OrganizationId,         Email,                     PasswordExpDate,   PasswordReset, CreateDate,      PasswordUpdateDate, SystemUser )
+		values (@OperatorUsername, @OperatorUserSamId, @TenantId, @OperatorUserFName, @OperatorUserLName,  @OrganizationId,        @OperatorUserEmailList,     '2099-12-31',        0,           GETUTCDATE(),   GETUTCDATE(),           1   ) ;
+	end
+end
+
+-- *** Licenses *** ---																	TenantId     AppId		           Available 						Assigned
+select @Count = count(*) from TenantAssignedApp Where TenantId = @TenantId
+if( @Count = 0 )
+begin
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'FrontAdmin',		@FrontAdminLicenses,        			0);
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'FrontRecollect',   @FrontAdminLicenses,   		       	    0);
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'FrontRecon',       @FrontAdminLicenses,   			        0);
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'FrontWeb',         @FrontFrontWebLicenses,   			    0);
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'FrontTM',          @FrontFrontTMLicenses,   			    0);
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'FileManager',      @FrontFileManagerLicenses,   			0);
+	Insert into TenantAssignedApp (TenantId, AppId, TotalLicenses, AssignedLicenses) values(@TenantId,	'UserManager',      @FrontUserManagerLicenses,   			0);
+end
+
+
+select @Count = count(*) from SystemUserAssignedApp Where TenantId = @TenantId
+if( @Count = 0 )
+begin
+	-- Assign apps the Admin user;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'UserManager', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontRecollect', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontRecon', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontWeb', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontTM', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FileManager', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontAdmin', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @AdminUsername;
+	-- Assign apps the Operations user;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'UserManager', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontRecollect', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontRecon', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontWeb', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontTM', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FileManager', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+	Insert into SystemUserAssignedApp(PortalUserId, AppId, TenantId, Assigned) select PortalUserId, 'FrontAdmin', @TenantId, 1 from PortalUser where TenantId = @TenantId and UserName = @OperatorUsername;
+end

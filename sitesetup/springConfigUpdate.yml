@@ -1,0 +1,250 @@
+parameters:
+  - name: allvariables
+    type: object
+  - name: allparameters
+    type: object
+    
+jobs:
+  - job: all
+    pool: ${{ parameters.allparameters.PoolName }}
+    variables:
+      - group: ${{ parameters.allparameters.keyVaultParameters }}
+      - name: KV
+        value: ${{ parameters.allparameters.KeyVault }}
+    steps:
+      - checkout: SiteSetup
+      - script: |
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ parameters.allvariables.springConfigServerUrl }} --Name frontier --Env ${{ parameters.allparameters.InputCustomerName }}  --Label ${{ parameters.allparameters.configBranch }} --Username user  --Password password  --VaultName ${{ parameters.allparameters.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+        displayName: 'Apply Configuration Files to Remote servers'
+
+      - checkout: git://Frontier\spring-cloud-deploy-config@${{ parameters.allparameters.configBranch }}
+        path: ${{ parameters.allparameters.InputCustomerName }}_repo
+
+      - powershell: |
+          if('${{ parameters.allparameters.InputEnvironment }}' -eq 'Dev'){
+            $domain = "lower"
+          }else{
+            $domain = "cloud"
+          }
+          if(!$(test-path "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/${{ parameters.allparameters.InputCustomerName }}" )){
+            mkdir -p $(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/${{ parameters.allparameters.InputCustomerName }}
+          }
+          copy-item -Path "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/templates/*.yml" -Destination "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/${{ parameters.allparameters.InputCustomerName }}" -PassThru  -Recurse -force
+          copy-item -Path "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/templates/$domain/*.yml" -Destination "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/${{ parameters.allparameters.InputCustomerName }}" -PassThru  -Recurse -force
+        displayName: Create a directory for tenant and copy template files
+
+      - powershell: |
+            if (!$(Get-Module -Name powershell-yaml -ListAvailable))
+            {
+                Install-Module powershell-yaml -RequiredVersion 0.4.3 -Scope CurrentUser -Force
+            }
+            Import-Module powershell-yaml -Force
+
+            $cmdbserver = "${{ parameters.allvariables.cmdbserver }}"
+            $region = "${{ parameters.allvariables.region }}"
+            $table = "$region" + "_" + "${{ parameters.allparameters.InputEnvironment }}" + "_Frontier"
+            $TenantName = "${{ parameters.allparameters.InputCustomerName }}"
+            $pod = "${{ parameters.allparameters.PODId }}"
+            $id = [decimal]$pod
+            $podname="POD$id"
+            $env = "${{ parameters.allparameters.InputEnvironment }}"
+            $dbname = "CMDB"
+            $webserver1 = "${{ parameters.allvariables.region }}" + "${{ parameters.allvariables.envprefix }}" + "DWEB-" + "${{ parameters.allparameters.PODId }}" + "01"
+            $webserver2 = "${{ parameters.allvariables.region }}" + "${{ parameters.allvariables.envprefix }}" + "DWEB-" + "${{ parameters.allparameters.PODId }}" + "02"
+            $batserver = "${{ parameters.allvariables.region }}" + "${{ parameters.allvariables.envprefix }}" + "TBAT-" + "${{ parameters.allparameters.PODId }}" + "01"
+            $sqlserver = "${{ parameters.allvariables.region }}" + "${{ parameters.allvariables.envprefix }}" + "SSQF-" + "${{ parameters.allparameters.PODId }}" + "01"
+            if('${{ parameters.allparameters.InputEnvironment }}' -eq 'Prod'){
+            $smtphost = "smtp.cadency.host"
+            }elseif('${{ parameters.allparameters.InputEnvironment }}' -eq 'Test'){
+            $smtphost = "testsmtp.cadency.host"
+            }else{
+            $smtphost = "smtp.lower.trintech.host"
+            }
+            $fileserver = "${{ parameters.allvariables.fileserver }}"
+            if('${{ parameters.allparameters.InputEnvironment }}' -eq 'Dev'){
+            $domainshort = "lower"
+            $share = "Tenant Shares"
+            $rootshare = ""
+            $usershare = "User"
+            $adminshare = "Admin"
+            } else {
+            $domainshort = "cloud"
+            $share = "ttw$"
+            $rootshare = ""
+            $usershare = "User"
+            $adminshare = "Admin"
+            }
+
+            $con                        = new-object "System.data.sqlclient.SQLconnection"
+            $con.ConnectionString       =("Data Source=$cmdbserver;Initial Catalog=$dbname;Integrated Security=SSPI")
+            $duplicate                  = Read-SqlTableData -ServerInstance $cmdbserver -DatabaseName $dbname -SchemaName "dbo" -TableName $table | Where-Object {$_.TenantName -eq $TenantName} 
+            $podavailibility            = Read-SqlTableData -ServerInstance $cmdbserver -DatabaseName $dbname -SchemaName "dbo" -TableName $table | Where-Object {$_.POD -eq $podname}
+            function Add-TenantEntry() {
+              param($table,$tenant,$Port,$podname)
+                $con.open()
+                $sqlcmd                 = new-object "System.data.sqlclient.sqlcommand"
+                $sqlcmd.connection      = $con
+                $sqlcmd.CommandText     = “UPDATE dbo.$table SET TenantName = '$tenant' , LastUpdated = FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm')  WHERE NamingPort ='$Port' AND POD = '$podname'”
+                $rowsAffected           = $sqlcmd.ExecuteNonQuery()
+                $con.close()
+                return $rowsAffected
+            }
+            #Adding tenant Entry
+            if ( $duplicate.TenantName -eq $TenantName ) { 
+              $DB                       = Read-SqlTableData -ServerInstance $cmdbserver -DatabaseName $dbname -SchemaName "dbo" -TableName $table | Where-Object {$_.POD -eq $podname}  | Where-Object {$_.TenantName -eq $TenantName}
+              $NamingPort               = ($DB | Select -ExpandProperty "NamingPort")
+              $FrontierSVCPort          = ($DB | Select -ExpandProperty "FrontierSVCPort")
+              $API_Port                 = ($DB | Select -ExpandProperty "API_Port")
+              $WF_HTTPPort              = ($DB | Select -ExpandProperty "WF_HTTPPort")
+              $WF_AJPPort               = ($DB | Select -ExpandProperty "WF_AJPPort")
+              $Web_HTTPPort             = ($DB | Select -ExpandProperty "Web_HTTPPort")
+              $Web_RedirectPort         = ($DB | Select -ExpandProperty "Web_RedirectPort")
+              Write-Host "$TenantName Tenant is already exist in the table."
+            }
+            elseif ( $duplicate.TenantName -ne $TenantName ) { 
+              $DB                       = Read-SqlTableData -ServerInstance $cmdbserver -DatabaseName $dbname -SchemaName "dbo" -TableName $table | Where-Object {$_.POD -eq $podname}  | Where-Object {$_.TenantName -eq 'blank'} | Select-Object -first 1 
+              $NamingPort               = ($DB | Select -ExpandProperty "NamingPort")
+              $FrontierSVCPort          = ($DB | Select -ExpandProperty "FrontierSVCPort")
+              $API_Port                 = ($DB | Select -ExpandProperty "API_Port")
+              $WF_HTTPPort              = ($DB | Select -ExpandProperty "WF_HTTPPort")
+              $WF_AJPPort               = ($DB | Select -ExpandProperty "WF_AJPPort")
+              $Web_HTTPPort             = ($DB | Select -ExpandProperty "Web_HTTPPort")
+              $Web_RedirectPort         = ($DB | Select -ExpandProperty "Web_RedirectPort")
+              if (@($podavailibility | Where-Object TenantName -eq "blank").Count -gt 0) {
+                Add-TenantEntry -table $table -tenant $TenantName -Port $NamingPort -podname $podname
+                Write-Host "$TenantName Tenant is added to the table."
+                }
+              else {
+                  throw  "Pod is reached to maximum limit."
+                }
+            }
+            Write-Host "Select Ports are: $NamingPort; $FrontierSVCPort; $API_Port; $WF_HTTPPort; $WF_AJPPort; $Web_HTTPPort; $Web_RedirectPort;"
+            if($NamingPort -eq $null -or $NamingPort -eq ''){
+              Write-Host "Port values are null!"
+              exit 1
+            }
+            #Updating application.yml file
+            $appconfigpath = '$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/${{ parameters.allparameters.InputCustomerName }}/application.yml'
+            (Get-Content $appconfigpath) | Foreach-Object {
+            $_ -replace '<CUSTOMERNAME>', "${{ parameters.allparameters.InputCustomerName }}" `
+                -replace '<ENVIRONMENT>', "${{ parameters.allparameters.InputEnvironment }}" `
+                -replace '<SMTP>', "$smtphost" `
+                -replace '<SMTPPORT>', "${{ parameters.allvariables.SMTPPort }}" `
+                -replace '<SHARE>', "$share" `
+                -replace '<ROOTSHARE>', "$rootshare" `
+                -replace '<USERSHARE>', "$usershare" `
+                -replace '<ADMINSHARE>', "$adminshare" `
+                -replace '<SQLSERVERNAME>', "$sqlserver" `
+                -replace '<FILESERVER>', "$fileserver" `
+                -replace '<DOMAINSHORT>', "$domainshort" `
+                -replace '<CUSTOMERDOMAIN>', "${{ parameters.allparameters.CustomerDomain }}" `
+                -replace '<LB1>', "${{ parameters.allvariables.lb1 }}" `
+                -replace '<LB2>', "${{ parameters.allvariables.lb2 }}"
+            } | Set-Content $appconfigpath
+
+            #Updating frontier.yml file
+            $frontierconfigpath = '$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/${{ parameters.allparameters.InputCustomerName }}/frontier.yml'
+            (Get-Content $frontierconfigpath) | Foreach-Object {
+            $_ -replace '<NAMINGPORT>', "$NamingPort" `
+                -replace '<WEBSERVICEPORT>', "$FrontierSVCPort" `
+                -replace '<TOMCATHTTPPORT>', "$Web_HTTPPort" `
+                -replace '<REDIRECTPORT>', "$Web_RedirectPort" `
+                -replace '<WEBSERVERS>', "$webserver1,$webserver2" `
+                -replace '<BATSERVERS>', "$batserver" `
+                -replace '<AJPPORT>', "$WF_AJPPort" `
+                -replace '<HTTPPORT>', "$WF_HTTPPort" `
+                -replace '<APIPORT>', "$API_Port" `
+                -replace '<WFENABLED>', "${{ parameters.allparameters.WFEnable }}" `
+                -replace '<SSOENABLED>', "${{ parameters.allparameters.isSSO }}" `
+                -replace '<LicenseCount>', "${{ parameters.allparameters.LicenseCount }}"
+            } | Set-Content $frontierconfigpath
+            
+      - powershell: |
+          Set-Location -Path "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo/"
+          ${{ parameters.allvariables.git }} checkout -b ${{ parameters.allparameters.InputCustomerName }}_temp
+        displayName: Create a new branch
+
+      - powershell: |
+          Set-Location -Path "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo"
+          ${{ parameters.allvariables.git }} add .
+          ${{ parameters.allvariables.git }} commit -m "updating ${{ parameters.allparameters.InputCustomerName }}_repo"
+          ${{ parameters.allvariables.git }} push -u  https://${env:SP_TOKEN}@trintech-coe.visualstudio.com/Frontier/_git/spring-cloud-deploy-config ${{ parameters.allparameters.InputCustomerName }}_temp
+        displayName: git push
+
+      - powershell: |
+            $extension = az extension list
+            $extensions = ConvertFrom-JSON $($extension -join '')
+            if ($extensions | Where {$_.name -eq 'azure-devops'})
+            {}else{
+                az extension add --name azure-devops
+            }
+            $org = "https://trintech-coe.visualstudio.com/"
+            $project = "Frontier"
+            $repo = "spring-cloud-deploy-config"
+            $pr_id = az repos pr create -r spring-cloud-deploy-config -s ${{ parameters.allparameters.InputCustomerName }}_temp -t ${{ parameters.allparameters.configBranch }} -d true --org $org -p $project --query pullRequestId --bypass-policy true --bypass-policy-reason "AZ DevOps Auto-Approve"
+            if ($pr_id -is [String])
+            {
+                Write-Host Please Approve Pull Request
+                Write-Host "##vso[task.setvariable variable=pr_id;]$($pr_id)"
+                Write-Host https://dev.azure.com/trintech-coe/$project/_git/$repo/pullrequest/$pr_id
+            }
+            else {  
+                throw("Pull-Request is not created")
+            }
+
+        displayName: Create PR
+        env:
+          AZURE_DEVOPS_EXT_PAT: $(SP_TOKEN)
+
+      - powershell: |
+            $extension = az extension list
+            $extensions = ConvertFrom-JSON $($extension -join '')
+            if ($extensions | Where {$_.name -eq 'azure-devops'})
+            {}else{
+                az extension add --name azure-devops
+            }
+            $org = "https://trintech-coe.visualstudio.com/"
+            $project = "Frontier"
+            $repo = "spring-cloud-deploy-config"
+
+            az devops configure --defaults organization=$org
+            az repos pr set-vote --id $env:pr_id --vote approve
+            az repos pr update --id $env:pr_id --status completed --delete-source-branch true
+        displayName: Approve PR        
+        env:
+          AZURE_DEVOPS_EXT_PAT: $(SP_TOKEN)
+
+      - powershell: |
+            $cmdbserver = "${{ parameters.allvariables.cmdbserver }}"
+            $table = "${{ parameters.allvariables.region }}" + "_" + "${{ parameters.allparameters.InputEnvironment }}" + "_Frontier"
+            $CustomerName = "${{ parameters.allparameters.InputCustomerName }}"
+            $dbname = "CMDB"
+            $con = new-object "System.data.sqlclient.SQLconnection"
+            $con.ConnectionString =(“Data Source=$cmdbserver;Initial Catalog=$dbname;Integrated Security=SSPI”)
+            function Remove-CustomerEntry ( [string]$tablename ) {
+                $con.open()
+                $sqlcmd = new-object "System.data.sqlclient.sqlcommand"
+                $sqlcmd.connection = $con
+                $sqlcmd.CommandText = “UPDATE dbo.$tablename SET TenantName = 'blank' , LastUpdated = NULL WHERE TenantName ='$CustomerName'”
+                $rowsAffected = $sqlcmd.ExecuteNonQuery()
+                $con.close()
+                }
+            Remove-CustomerEntry -tablename $table
+
+        displayName: Cleanup CMDB
+        condition: or(eq(variables['Agent.JobStatus'], 'Canceled'),eq(variables['Agent.JobStatus'], 'Failed'),eq(variables['Agent.JobStatus'], 'SucceededWithIssues'))
+      
+      - powershell: |
+          ${{ parameters.allvariables.git }} push -u https://${env:SP_TOKEN}@trintech-coe.visualstudio.com/Frontier/_git/spring-cloud-deploy-config  --delete ${{ parameters.allparameters.InputCustomerName }}_temp
+        workingDirectory: "$(Pipeline.Workspace)/${{ parameters.allparameters.InputCustomerName }}_repo"
+        condition: always()
+        continueOnError: true 
+        displayName: Deleting existing temp branch
+
+      - powershell: |
+          Start-Sleep -s 5
+          Remove-Item -LiteralPath "${{ parameters.allparameters.InputCustomerName }}_repo" -Force -Recurse
+        displayName: Cleanup
+        workingDirectory: "$(Pipeline.Workspace)"
+        continueOnError: true
+        condition: always()

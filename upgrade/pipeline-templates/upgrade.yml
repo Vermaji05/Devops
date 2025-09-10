@@ -1,0 +1,71 @@
+parameters:
+  - name: PoolName
+    type: string
+  - name: InputEnvironment
+    type: string
+  - name: PODId
+    type: string
+jobs:
+  - job: all
+    pool: ${{ parameters.PoolName }}
+    variables:
+      - group: ${{ variables.keyVaultParameters }}
+      - name: KV
+        value: ${{ variables.KeyVault }}
+    steps:
+      - powershell: |
+          $user = "$(Admin.Username)"
+          $password = "$(ADMIN.PASSWORD)"
+          $SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+          $Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+          $webServer = "${{ parameters.allvariables.region }}" + "${{ parameters.allvariables.envprefix }}" + "DWEB-" + "${{ parameters.allparameters.PODId }}" + "01" + ".$($env:userdnsdomain)"
+          $tenants = Invoke-Command -ComputerName $webServer -Credential $Credentials -UseSSL -ScriptBlock {
+                    get-service -DisplayName '*Tomcat*' | ForEach-Object {
+                        $service = $_
+                        $name = $service.DisplayName
+                        $servicelookup = (Get-WmiObject win32_service -filter "Displayname ='$name'")
+                        $type = $servicelookup.StartMode
+                        $path = ""
+                        if ($name -LIKE '*Tomcat*' -and $type -ne 'Disabled') {
+                            $path = $servicelookup.PathName -replace '"'
+                            $path = Split-Path $path -Leaf
+                            $path = $path -replace 'Frontier', ''
+                            $path = $path -replace '_', ''
+                            $path        
+                        } } }
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ variables.springConfigServerUrl }} --Name frontier --Env templates  --Label main --Username user  --Password password  --VaultName ${{ variables.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+          Write-Host "##vso[task.setvariable variable=tenants;]$($tenants)"
+        displayName: Read variables from ${{variables.springConfigServerUrl}} and Extracting tenant names
+      - task: UniversalPackages@0
+        displayName: Download Frontier Build Package
+        inputs:
+          command: 'download'
+          downloadDirectory: '$(System.DefaultWorkingDirectory)\Artifact'
+          feedsToUse: 'internal'
+          vstsFeed: 'Frontier/frontier'
+          vstsFeedPackage: 'hosted-installs'
+          vstsPackageVersion: '${{ parameters.Version }}'
+          verbosity: 'Debug'
+      - powershell: |
+          Expand-Archive -Path '$(System.DefaultWorkingDirectory)\Artifact\Frontier.zip' -DestinationPath '$(System.DefaultWorkingDirectory)\Artifact\Frontier'
+          Write-Host "##vso[task.setvariable variable=versionPath;]$(System.DefaultWorkingDirectory)\Artifact\Frontier"
+        displayName: Extracting version zip
+      - task: PowerShell@2
+        displayName: Running Prerequisite setup.exe on each box
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Run-PreReqs.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'' -version ''${{ parameters.Version }}'''
+      - task: PowerShell@2
+        displayName: Recreating ODBC connections on POD ${{ parameters.PODId }}
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Recreate-ODBC-Conns.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'' -tenants $(tenants)'
+      - task: PowerShell@2
+        displayName: 'Creating Backup of binaries and download new version'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Copy-Binaries.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'' -location $(System.DefaultWorkingDirectory)\Artifact -version ''${{ parameters.Version }}'''
+

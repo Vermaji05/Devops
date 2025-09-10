@@ -1,0 +1,1796 @@
+-- ****************************************************************************
+-- *                                                                          *
+-- *  Script name    :  SQL_Frontier20231_20241.sql                           *
+-- *                                                                          *
+-- *  DBMS name      :  SQL Server                                            *
+-- *                                                                          *
+-- * (c) 2005-2024, Trintech. All Rights Reserved.                          *
+-- *                                                                          *
+-- ****************************************************************************
+
+-- common schema update
+DECLARE
+	@Version   integer,
+	@MinId     int,
+	@MaxId     int,
+	@Total     int,
+	@BATCHSIZE integer,
+	@strMsg    nvarchar(255)
+BEGIN
+    select @Version = VERSION from COMMONSCHEMAVERSION
+    if(@Version < 840)
+    begin
+		IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'CashAccountBalanceUpdated' AND COLUMN_NAME = 'CashAccountBalanceUpdatedId' AND DATA_TYPE = 'int')
+		begin
+			SELECT @BATCHSIZE = 1000000
+
+			SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Modifying column CashAccountBalanceUpdatedId of table CashAccountBalanceUpdated to be bigint...'
+			RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+			SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Calculating count(CashAccountBalanceUpdatedId) from CashAccountBalanceUpdated...'
+			RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+			SELECT @Total = Count(CashAccountBalanceUpdatedId) FROM CashAccountBalanceUpdated
+    
+			SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Total count(CashAccountBalanceUpdatedId) rows: ' + cast(@Total as varchar)
+			RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+			if(@Total > 0)
+			begin
+				if not exists (select * from dbo.sysobjects where id = object_id(N'[dbo].[CashAccountBalanceUpdatedNEW]') and OBJECTPROPERTY(id, N'IsUserTable') = 1)
+				BEGIN
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Creating and populating CashAccountBalanceUpdateNEW table from CashAccountBalanceUpdated in batches of ' + cast(@BATCHSIZE as varchar) + '...'
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+					CREATE TABLE CashAccountBalanceUpdatedNEW
+								(
+									CashAccountBalanceUpdatedId bigint IDENTITY(1,1) NOT NULL CONSTRAINT CashABU_PK PRIMARY key CLUSTERED,
+									CashAccountBalanceId int NOT NULL CONSTRAINT CashABU_CashABId_FK FOREIGN KEY (CashAccountBalanceId) REFERENCES dbo.CashAccountBalance ( Id ) ON DELETE CASCADE,
+									UpdatedDate datetime NOT NULL
+								);
+
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Calculating Min(CashAccountBalanceUpdatedId) from CashAccountBalanceUpdated...'
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+					SELECT @MinId = Min(CashAccountBalanceUpdatedId) FROM CashAccountBalanceUpdated
+
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Min(CashAccountBalanceUpdatedId) from CashAccountBalanceUpdated: ' + cast(@MinId as varchar)
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Calculating Max(CashAccountBalanceUpdatedId) from CashAccountBalanceUpdated...'
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+					SELECT @MaxId = Max(CashAccountBalanceUpdatedId) FROM CashAccountBalanceUpdated
+
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Max(CashAccountBalanceUpdatedId) from CashAccountBalanceUpdated: ' + cast(@MaxId as varchar)
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+					while (@MinId <= @MaxId)
+					begin
+						insert into CashAccountBalanceUpdatedNEW select CashAccountBalanceId, UpdatedDate from CashAccountBalanceUpdated where CashAccountBalanceUpdatedId >= @MinId and CashAccountBalanceUpdatedId < @MinId + @BATCHSIZE
+
+						SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Inserted ' + cast(@@ROWCOUNT as varchar) + ' records into CashAccountBalanceUpdateNEW starting from CashAccountBalanceUpdatedId: ' + cast(@MinId as varchar)
+						RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+						Select @MinId = @MinId + @BATCHSIZE
+					end
+
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - CashAccountBalanceUpdateNEW created and populated'
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+				end
+
+				if not exists (select * from dbo.sysindexes where name = 'CashABU_CashABId_CashABUId')
+				begin
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Creating CashABU_CashABId_CashABUId index...'
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+					CREATE NONCLUSTERED INDEX CashABU_CashABId_CashABUId ON CashAccountBalanceUpdatedNEW(CashAccountBalanceId,CashAccountBalanceUpdatedId);
+
+					SET @strMsg = CONVERT(char(20),getdate(),109) + ' - CashABU_CashABId_CashABUId index created'
+					RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+				end
+
+				SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Dropping table CashAccountBalanceUpdated...'
+				RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+				DROP TABLE CashAccountBalanceUpdated
+
+				SET @strMsg = CONVERT(char(20),getdate(),109) + ' - Renaming table CashAccountBalanceUpdatedNEW as CashAccountBalanceUpdated...'
+				RAISERROR (@strMsg, 0, 1) WITH NOWAIT
+
+				EXEC sp_rename 'CashAccountBalanceUpdatedNEW', 'CashAccountBalanceUpdated'
+			end
+			else
+			begin
+				print CONVERT(char(20),getdate(),109) + ' - Dropping/re-adding constraints and altering column CashAccountBalanceUpdatedId of table CashAccountBalanceUpdated...'
+				
+				DROP INDEX CashAccountBalanceUpdated_CashAcctBalId_CashAcctBalUpdtId ON CashAccountBalanceUpdated
+				ALTER TABLE CashAccountBalanceUpdated DROP CONSTRAINT CashAccountBalanceUpdated_PK 
+				ALTER TABLE CashAccountBalanceUpdated ALTER COLUMN CashAccountBalanceUpdatedId bigint
+				ALTER TABLE CashAccountBalanceUpdated ADD CONSTRAINT CashAccountBalanceUpdated_PK PRIMARY KEY CLUSTERED (CashAccountBalanceUpdatedId ASC)
+				EXEC sp_rename N'CashAccBalUpd_CashAccBal_FK', N'CashABU_CashABId_FK', N'object'
+			end
+
+			print CONVERT(char(20),getdate(),109) + ' - Done modifying column CashAccountBalanceUpdatedId of table CashAccountBalanceUpdated to be bigint...'
+		end
+
+		IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Lookup' AND COLUMN_NAME = 'LookupId')
+		BEGIN
+			ALTER TABLE Lookup ADD LookupId BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT Lookup_PK PRIMARY KEY CLUSTERED;
+		    print CONVERT(char(20),getdate(),109) + ' - Added identity column LookupId to table Lookup';
+        END
+        
+    	if not exists (select * from dbo.syscolumns where id = object_id(N'[dbo].[FrontierDeportItem]') and name = 'ItemStmt' and type = 39)
+    	begin
+      		ALTER TABLE FrontierDeportItem ALTER COLUMN ItemStmt VARCHAR(5) NULL;
+      		print CONVERT(char(20),getdate(),109) +  '  - Updated FrontierDeportItem Table Schema for ItemStmt column from int to VARCHAR(5)'
+    	end
+		
+		if exists (SELECT * FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_NAME ='FK__MENUSHORT__COMPA__6FEB364D')
+		begin
+			ALTER TABLE [dbo].[MENUSHORTCUT] DROP CONSTRAINT [FK__MENUSHORT__COMPA__6FEB364D]
+
+			ALTER TABLE [dbo].[MENUSHORTCUT] WITH CHECK ADD CONSTRAINT [MENUSHORTCUT_COMPANY_FK] FOREIGN KEY([COMPANYID])
+			REFERENCES [dbo].[Company] ([Id]) ON DELETE CASCADE
+
+			ALTER TABLE [dbo].[MENUSHORTCUT] CHECK CONSTRAINT [MENUSHORTCUT_COMPANY_FK]
+			print CONVERT(char(20),getdate(),109) + ' - Updated CompanyId constraint on MenuShortcut table.'
+		end		
+	end
+end
+GO
+
+declare
+    @Version int
+begin
+    select @Version = Version from COMMONSCHEMAVERSION;
+    if (@Version <= 840)
+    begin
+		if not exists (select * from dbo.sysobjects where id = object_id(N'[dbo].[UserConfig]') and OBJECTPROPERTY(id, N'IsUserTable') = 1)
+		begin
+			print 'Creating table UserConfig'
+			CREATE TABLE UserConfig(
+				UserConfigId int NOT NULL IDENTITY(1,1) CONSTRAINT UserConfig_PK PRIMARY KEY CLUSTERED,
+				UserName    varchar(50)             NULL,
+				Section     varchar(255)            NOT NULL,
+				ProfileKey  varchar(255)            NOT NULL,
+				Entry       varchar(4000)           NULL,
+				IsDefault   int         DEFAULT (0) NOT NULL,
+				IsOverride  int         DEFAULT (1) NOT NULL,
+				Application varchar(50)             NULL
+			);
+
+			create unique index User_Sect_Key_UserConfig on UserConfig (UserName, Section, ProfileKey);
+
+			print 'Created table UserConfig'
+		end
+    end
+end
+go
+
+GRANT REFERENCES, SELECT, INSERT, UPDATE, DELETE ON dbo.UserConfig TO SqlUsers
+GO
+
+print CONVERT(char(20),getdate(),109) + ' - Recreate Stored Procedures'
+GO
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_CertBalanceCustomField]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	drop procedure [dbo].[FS_CertBalanceCustomField];
+GO
+
+create procedure [dbo].[FS_CertBalanceCustomField]
+(
+    @Operation          varchar(25),
+    @FieldName          varchar(35),
+    @FieldDisplayName   varchar(50),
+    @ColDesc            nvarchar(100) = NULL,
+    @MetadataType       nvarchar(50)  = NULL,
+    @MetadataSize       nvarchar(10)  = NULL,
+    @MetadataDecimals   nvarchar(10)  = NULL,
+    @MetadataMin        nvarchar(20)  = NULL,
+    @MetadataMax        nvarchar(20)  = NULL,
+    @isTest             integer       = 0,
+    @isPrinting         integer       = 0,
+    @Result             int           = -1      output, 
+    @ResultString       varchar(2000) = ''      output
+)
+as
+begin
+begin try
+    set nocount on
+    declare @SqlStmt            nvarchar(max);
+    declare @MetadataId         integer;
+    declare @MetadataIdMin      integer         = 4913000;
+    declare @MetadataIdMax      integer         = 4913999;
+    declare @MetadataEditable   varchar(1)      = '1';
+    declare @TableName          varchar(100)    = 'AccountCertBalance';
+    declare @MetadataBOName     varchar(100)    = 'ACCOUNTCERTBALANCE';
+    declare @MetadataTableName  varchar(100)    = 'AccountCertBalance';
+    
+    if(upper(@Operation) = 'ADD')
+    begin
+        -- Make sure field does not exist
+        if ( @isTest = 0 )
+        begin
+            if exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' already exists on ' + @TableName;
+                return;
+            end
+        end
+
+        -- Add it to the table
+        set @SqlStmt = N'alter table ' + @TableName + ' add ' + @FieldName + N' ' + @ColDesc + N' with values;';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        if ( @isTest = 0 )
+        begin
+            --  verify that field was added
+            if not exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' was not added to ' + upper(@TableName);
+                return;
+            end
+        end;
+
+        -- Add metadata
+        if exists (select * from Metadata where METADATAID between @MetadataIdMin and @MetadataIdMax)
+        begin
+            SET @MetadataId = (select max(METADATAID) + 1 from Metadata where METADATAID between @MetadataIdMin and @MetadataIdMax);        
+        end
+        else
+        begin
+            set @MetadataId  = @MetadataIdMin;
+        end
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+        
+        Set @MetadataBOName = 'ACCOUNTCERTBALANCEGRID';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+        
+        --IMPORTACCOUNTCERTBALANCE
+        Set @MetadataBOName = 'IMPORTACCOUNTCERTBALANCE';
+        Set @MetadataTableName = 'AccountCertBalance';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+        
+        -- Modify filters and views
+        set @ResultString = @FieldName + ' column with display name ''' + @FieldDisplayName + ''' has been added to AccountCertBalance table.';
+    end    
+    else if (upper(@Operation) = 'UPDATE')    
+    begin
+        -- Make sure field exists
+        if ( @isTest = 0 )
+        begin
+            if not exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' does not exist on ' + @TableName;
+                return;
+            end
+        end
+
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        Set @MetadataBOName = 'ACCOUNTCERTBALANCEGRID';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        Set @MetadataBOName = 'IMPORTACCOUNTCERTBALANCE';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @ResultString = 'AccountCertBalance.' + @FieldName + ' column display name has been updated to ''' + @FieldDisplayName + '''.';
+    end;
+    
+    set @Result = 0;
+    return;
+    
+end try
+begin catch
+    set @Result       = @@ERROR;
+    set @ResultString = ERROR_MESSAGE() + ', SQL: ' + @SqlStmt;
+    return;
+end catch
+end
+go
+
+GRANT EXECUTE ON dbo.FS_CertBalanceCustomField to SqlUsers
+go
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_AccountPoolCertCustomField]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	drop procedure [dbo].[FS_AccountPoolCertCustomField];
+GO
+
+create procedure [dbo].[FS_AccountPoolCertCustomField]
+(
+    @Operation          varchar(25),
+    @FieldName          varchar(35),
+    @FieldDisplayName   varchar(50),
+    @ColDesc            nvarchar(100) = NULL,
+    @MetadataType       nvarchar(50)  = NULL,
+    @MetadataSize       nvarchar(10)  = NULL,
+    @MetadataDecimals   nvarchar(10)  = NULL,
+    @MetadataMin        nvarchar(20)  = NULL,
+    @MetadataMax        nvarchar(20)  = NULL,
+    @isTest             integer       = 0,
+    @isPrinting         integer       = 0,
+    @Result             int           = -1      output, 
+    @ResultString       varchar(2000) = ''      output
+)
+as
+begin
+begin try
+    set nocount on
+    declare @MetadataId         integer;
+    declare @SqlStmt            nvarchar(max);
+    declare @MetadataIdMin      integer         = 4911000;
+    declare @MetadataIdMax      integer         = 4911999;
+    declare @MetadataEditable   nvarchar(1)     = 1;
+    declare @TableName          varchar(100)    = 'AccountPoolCert';
+    declare @MetadataBOName     varchar(100)    = 'CERTACCOUNTPOOL';
+    declare @MetadataTableName  varchar(100)    = 'CERTACCOUNTPOOL';
+
+    if(upper(@Operation) = 'ADD')
+    begin
+        -- Make sure field does not exist
+        if ( @isTest = 0 )
+        begin
+            if exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' already exists on ' + @TableName;
+                return;
+            end
+        end
+
+        -- Add it to the table
+        set @SqlStmt = N'alter table ' + @TableName + ' add ' + @FieldName + N' ' + @ColDesc + N' with values;';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        if ( @isTest = 0 )
+        begin
+            --  verify that field was added
+            if not exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' was not added to ' + upper(@TableName);
+                return;
+            end
+        end;
+
+        -- Add metadata
+        if exists (select * from Metadata where METADATAID between @MetadataIdMin and @MetadataIdMax)
+        begin
+            SET @MetadataId = (select max(METADATAID) + 1 from Metadata where METADATAID between @MetadataIdMin and @MetadataIdMax);        
+        end
+        else
+        begin
+            set @MetadataId  = @MetadataIdMin;
+        end
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+        
+        ---- IMPORTACCOUNTPOOLCERT
+        Set @MetadataBOName = 'IMPORTACCOUNTPOOLCERT';
+        Set @MetadataTableName = 'CERTACCOUNTPOOL';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting        
+        
+        Set @MetadataBOName = 'BULKCERTBALANCEPOOL';
+        Set @MetadataTableName = 'BULKCERTBALANCEPOOL';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Modify filters and views
+        exec CUSTOMFIELDSFILTERMETADATA @MetadataBOName, NULL, @isTest, @isPrinting, @Result output, @ResultString output
+
+        if(@Result = 0)
+            execute FS_CreateViewBULKCERTBALANCEPOOL @isTest, @isPrinting, @Result output, @ResultString output
+        if(@Result = 0)
+            execute FS_CreateViewCERTACCOUNTPOOL @isTest, @isPrinting, @Result output, @ResultString output
+
+        set @ResultString = @FieldName + ' column with display name ''' + @FieldDisplayName + ''' has been added to AccountPoolCert table.';
+    end    
+    else if (upper(@Operation) = 'UPDATE')    
+    begin
+        -- Make sure field exists
+        if ( @isTest = 0 )
+        begin
+            if not exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' does not exist on ' + @TableName;
+                return;
+            end
+        end
+
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        Set @MetadataBOName = 'IMPORTACCOUNTPOOLCERT';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        Set @MetadataBOName = 'BULKCERTBALANCEPOOL';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @ResultString = 'AccountPoolCert.' + @FieldName + ' column display name has been updated to ''' + @FieldDisplayName + '''.';
+    end
+    
+    set @Result = 0;
+    return;
+    
+end try
+begin catch
+    set @Result       = @@ERROR;
+    set @ResultString = ERROR_MESSAGE() + ', SQL: ' + @SqlStmt;
+    return;
+end catch
+end
+go
+
+GRANT EXECUTE ON dbo.FS_AccountPoolCertCustomField to SqlUsers
+go
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_ReconcilingItemCustomField]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	drop procedure [dbo].[FS_ReconcilingItemCustomField];
+GO
+
+create procedure [dbo].[FS_ReconcilingItemCustomField]
+(
+    @Operation          varchar(25),
+    @FieldName          varchar(35),
+    @FieldDisplayName   varchar(50),
+    @ColDesc            nvarchar(100) = NULL,
+    @MetadataType       nvarchar(50)  = NULL,
+    @MetadataSize       nvarchar(10)  = NULL,
+    @MetadataDecimals   nvarchar(10)  = NULL,
+    @MetadataMin        nvarchar(20)  = NULL,
+    @MetadataMax        nvarchar(20)  = NULL,
+    @isTest             integer       = 0,
+    @isPrinting         integer       = 0,
+    @Result             int           = -1      output, 
+    @ResultString       varchar(2000) = ''      output
+)
+as
+begin
+begin try
+    set nocount on
+    declare @MetadataId         integer;
+    declare @SqlStmt            nvarchar(max);
+    declare @MetadataIdMin      integer         = 4914000;
+    declare @MetadataIdMax      integer         = 4914999;
+    declare @MetadataEditable   nvarchar(1)     = 1;
+    declare @TableName          varchar(100)    = 'ReconcilingItem';
+    declare @SubmissionTableName          varchar(100)    = 'CertSubmissionItem';
+    declare @MetadataBOName     varchar(100)    = 'RECONCILINGITEM';
+    declare @MetadataTableName  varchar(100)    = 'RECONCILINGGRIDITEM';
+    declare @CertTemplateId         integer;
+    
+    if(upper(@Operation) = 'ADD')
+    begin
+        -- Make sure field does not exist
+        if ( @isTest = 0 )
+        begin
+            if exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' already exists on ' + @TableName;
+                return;
+            end
+        end
+
+        -- Add it to the table
+        set @SqlStmt = N'alter table ' + @TableName + ' add ' + @FieldName + N' ' + @ColDesc + N' with values;';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'alter table ' + @SubmissionTableName + ' add ' + @FieldName + N' ' + @ColDesc + N' with values;';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        if ( @isTest = 0 )
+        begin
+            --  verify that field was added
+            if not exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' was not added to ' + upper(@TableName);
+                return;
+            end
+        end;
+
+        -- Add metadata
+        if exists (select * from Metadata where METADATAID between @MetadataIdMin and @MetadataIdMax)
+        begin
+            SET @MetadataId = (select max(METADATAID) + 1 from Metadata where METADATAID between @MetadataIdMin and @MetadataIdMax);        
+        end
+        else
+        begin
+            set @MetadataId  = @MetadataIdMin;
+        end
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add the new field to existing Cert rec item Templates.
+        declare cert_template_cursor cursor for 
+                select CertTemplateId from CertTemplate;
+
+        open cert_template_cursor
+        fetch next from cert_template_cursor into @CertTemplateId;
+        while (@@fetch_status = 0)
+        begin               
+            set @SqlStmt = N'delete from CertRecItemTemplate where FieldId = ''' + convert(nvarchar,@MetadataId) + ''' and CertTemplateId = ''' + convert(nvarchar, @CertTemplateId) + ''';';
+            exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting        
+            set @SqlStmt = N'INSERT INTO CertRecItemTemplate (CertTemplateId, FieldId, DisplayName, Viewable, EditManual, EditSubmitted, Required)' +
+                           N' values ( ' + convert(nvarchar, @CertTemplateId) + ',' + convert(nvarchar,@MetadataId) + N', '''', 1, 1, 1, 0 )';
+            exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting             
+            fetch next from cert_template_cursor into @CertTemplateId;
+        end
+        close cert_template_cursor;
+        deallocate cert_template_cursor;
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        Set @MetadataBOName = 'RECITEMSGRID';
+        Set @MetadataTableName = 'RECITEMSGRID';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+		-------RECONCILINGITEMINSERT
+
+		 Set @MetadataBOName = 'RECONCILINGITEMINSERT';
+        Set @MetadataTableName = 'RECONCILINGITEM';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+
+        ---- IMPORTRECONCILINGITEM
+        
+		Set @MetadataBOName = 'IMPORTRECONCILINGITEM';
+        Set @MetadataTableName = 'RECONCILINGGRIDITEM';
+        set @MetadataId = @MetadataId + 1;
+
+        set @SqlStmt = N'delete from Metadata where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into Metadata (METADATAID,LOGICALID,SEQUENCENUM,COMPANYID,CLIENTDATA,BUSINESSOBJECT,TABLENAME,ELEMENTNAME,PHYSICALNAME,REQUIRED,EDITABLE,MATCHABLE,VIEWABLE,IMPORTABLE,UPDATABLE,DEFAULTSORT,TYPE,LENGTH,DECIMALS,MINIMUM,MAXIMUM,DEFAULTFUNCTION,CLIENTBATCHSIZE,USEPROFILE,FOREIGNOBJECTNAME,FOREIGNELEMENTNAME,FOREIGNKEYNAME,FOREIGNELEMENTTYPE,FOREIGNKEYTYPE,FOREIGNORDERBY,FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT) ' +
+                       N'values (' + convert(nvarchar,@MetadataId) + N',0,0,1,1,''' + @MetadataBOName + ''',''' + @MetadataTableName + ''',''' + convert(nvarchar(35),upper(@FieldName)) + N''',''' + convert(nvarchar(35),@FieldName) + N''',0,' + @MetadataEditable + ',0,1,0,1,0,''' + @MetadataType + N''',' + @MetadataSize + N',' + @MetadataDecimals + N',' + @MetadataMin + N',' + @MetadataMax + N',NULL,NULL,0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,0,''' + convert(nvarchar(100),@FieldDisplayName) + N''',0,1);';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        -- Add FrontierCustomField row
+        set @SqlStmt = N'delete from FrontierCustomField where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(FieldName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @SqlStmt = N'insert into FrontierCustomField (BusinessObject, FieldName, MetadataId) ' + 
+                       N'values (''' + @MetadataBOName + ''',''' + convert(nvarchar(35),@FieldName) + N''', '  + convert(nvarchar,@MetadataId) + N');';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting             
+        
+        -- Modify filters and views
+        exec CUSTOMFIELDSFILTERMETADATA @MetadataBOName, NULL, @isTest, @isPrinting, @Result output, @ResultString output
+        
+        if(@Result = 0)
+            exec FS_CreateViewReconcilingGridItem   @isTest, @isPrinting, @Result output, @ResultString output 
+        if(@Result = 0)
+            exec FS_CreateViewRecItemsGrid          @isTest, @isPrinting, @Result output, @ResultString output
+        if(@Result = 0)
+            exec FS_CreateRecItemFieldTrigger       @isTest, @isPrinting, @Result output, @ResultString output 
+
+        if(@Result = 0)
+        begin
+            if exists (select * from dbo.sysobjects where id = object_id(N'[dbo].[ReconcilingItemWithCustomField]') and OBJECTPROPERTY(id, N'IsView') = 1)
+            begin
+                set @SqlStmt = N'drop view ReconcilingItemWithCustomField;';
+                exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+            end
+            set @SqlStmt = N'create view ReconcilingItemWithCustomField as select * from ReconcilingItem;';
+            exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+            set @SqlStmt = N'GRANT REFERENCES, SELECT, INSERT, UPDATE, DELETE ON dbo.ReconcilingItemWithCustomField TO SqlUsers;';
+            exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+        end        
+
+        set @ResultString = @FieldName + ' column with display name ''' + @FieldDisplayName + ''' has been added to ReconcilingItem table.';
+    end    
+    else if (upper(@Operation) = 'UPDATE')    
+    begin
+        -- Make sure field exists
+        if ( @isTest = 0 )
+        begin
+            if not exists (select * from information_schema.columns where upper(table_name) = upper(@TableName) and upper(COLUMN_NAME) = upper(@FieldName))
+            begin
+                set @Result = -2;
+                set @ResultString = @FieldName + ' does not exist on ' + @TableName;
+                return;
+            end
+        end
+
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        Set @MetadataBOName = 'RECITEMSGRID';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+		Set @MetadataBOName = 'RECONCILINGITEMINSERT';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+		Set @MetadataBOName = 'IMPORTRECONCILINGITEM';
+        set @SqlStmt = N'update Metadata set DISPLAYNAME = ''' + convert(nvarchar(100),@FieldDisplayName) + N''' where upper(BusinessObject) = ''' + @MetadataBOName + ''' and upper(PhysicalName) = ''' + upper(@FieldName) + ''';';
+        exec CF_PrintExecuteSQL @SqlStmt, 0, 0, 0, @isTest, @isPrinting
+
+        set @ResultString = 'ReconcilingItem.' + @FieldName + ' column display name has been updated to ''' + @FieldDisplayName + '''.';
+		
+    end
+
+    set @Result = 0;
+    return;
+    
+end try
+begin catch
+    set @Result       = @@ERROR;
+    set @ResultString = ERROR_MESSAGE() + ', SQL: ' + @SqlStmt;
+    return;
+end catch
+end
+go
+
+GRANT EXECUTE ON dbo.FS_ReconcilingItemCustomField to SqlUsers
+go
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_AddUpdateCertCustomField]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	drop procedure [dbo].[FS_AddUpdateCertCustomField];
+GO
+
+create procedure [dbo].[FS_AddUpdateCertCustomField]
+(
+    @Operation          varchar(25), 
+    @FieldName          varchar(35),
+    @FieldDisplayName   varchar(50),
+    @FieldType          varchar(10) = 'TEXT',
+    @FieldLength        varchar(10) = 255,
+    @isExecuting        integer     = 1,
+    @isPrinting         integer     = 0,
+    @Result             int         = -1       output, 
+    @ResultString       varchar(2000) = ''     output
+)
+as
+begin
+begin try
+    set nocount on
+    declare @ColDesc            nvarchar(100);
+    declare @MetadataType       nvarchar(50);
+    declare @MetadataSize       nvarchar(10);
+    declare @MetadataDecimals   nvarchar(10);
+    declare @MetadataMin        nvarchar(20);
+    declare @MetadataMax        nvarchar(20);
+    declare @isTest             integer;
+    declare @ResultStringCurr   varchar(2000) = '';
+
+    if(@isExecuting = 1)
+        set @isTest = 0
+    else
+        set @isTest = 1
+     
+    if(upper(@Operation) = 'ADD')
+    begin
+        exec FS_UserInputToMetadata @FieldName, @FieldDisplayName, @FieldType, @FieldLength, @ColDesc output, @MetadataType output, @MetadataSize output, @MetadataDecimals output, @MetadataMin output, @MetadataMax output, @Result output, @ResultString output
+    end
+    else if(upper(@Operation) = 'UPDATE')
+        SET @Result = 0;
+    else
+    begin
+        set @ResultString = 'Invalid operation: ' + @Operation;
+        SET @Result = -2;
+        return;
+    end
+
+    -- call SP to add the field to AccountPoolCert table
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+            print '------ Modifying AccountPoolCert table ------'
+        execute FS_AccountPoolCertCustomField @Operation, @FieldName, @FieldDisplayName, @ColDesc, @MetadataType, @MetadataSize, @MetadataDecimals, @MetadataMin, @MetadataMax, @isTest, @isPrinting, @Result output, @ResultStringCurr output
+        set @ResultString = @ResultStringCurr;
+    end;
+
+    -- call SP to add the field to CertAccountInfo table -- !!! -- call this after modifying AccountPoolCert table
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+            print char(13) + '------ Modifying CertAccountInfo table ------'
+        execute FS_CertAccountInfoCustomField @Operation, @FieldName, @FieldDisplayName, @ColDesc, @MetadataType, @MetadataSize, @MetadataDecimals, @MetadataMin, @MetadataMax, @isTest, @isPrinting, @Result output, @ResultStringCurr output
+        set @ResultString = @ResultString + char(13) + @ResultStringCurr;
+    end;
+
+    -- call SP to add the field to Certification table
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+            print char(13) + '------ Modifying Certification table ------'
+        execute FS_CertificationCustomField @Operation, @FieldName, @FieldDisplayName, @ColDesc, @MetadataType, @MetadataSize, @MetadataDecimals, @MetadataMin, @MetadataMax, @isTest, @isPrinting, @Result output, @ResultStringCurr output
+        set @ResultString = @ResultString + char(13) + @ResultStringCurr;
+    end;
+
+    -- call SP to add the field to AccountCertBalance table
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+            print char(13) + '------ Modifying AccountCertBalance table ------'
+        execute FS_CertBalanceCustomField @Operation, @FieldName, @FieldDisplayName, @ColDesc, @MetadataType, @MetadataSize, @MetadataDecimals, @MetadataMin, @MetadataMax, @isTest, @isPrinting, @Result output, @ResultStringCurr output 
+        set @ResultString = @ResultString + char(13) + @ResultStringCurr;
+    end;
+ 
+    -- call SP to add the field to ReconcilingItem table
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+            print char(13) + '------ Modifying ReconcilingItem table ------'
+        execute FS_ReconcilingItemCustomField @Operation, @FieldName, @FieldDisplayName, @ColDesc, @MetadataType, @MetadataSize, @MetadataDecimals, @MetadataMin, @MetadataMax, @isTest, @isPrinting, @Result output, @ResultStringCurr output 
+        set @ResultString = @ResultString + char(13) + @ResultStringCurr;
+    end;
+
+    -- Insert metadata for segment fields in transfer manager
+    if(@Result = 0)    
+    begin
+        if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_CreateTMSegmentMetadata]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+        begin
+            exec FS_CreateTMSegmentMetadata @isTest, @isPrinting
+        end
+    end
+
+    -- call SP to add the field to ReconcilingItem table
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+    begin
+            print char(13) + '------ Updating CERTACCOUNTPOOLGROUP metadata ------'
+    end
+        execute FS_CreateAcctCertGroupMetadata
+        set @ResultString = @ResultString + char(13) + 'Processed CERTACCOUNTPOOLGROUP metadata';
+    end;
+
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+        begin
+            print char(13) + '------ Updating CERTACCOUNTS metadata ------'
+        end
+        execute FS_CertAccountsViewMetadata
+        set @ResultString = @ResultString + char(13) + 'Processed CERTACCOUNTS metadata';
+    end;
+    
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+        begin
+            print char(13) + '------ Re-creating CertAccountsView view ------'
+        end
+        execute FS_CreateCertAccountsView
+		set @ResultString = @ResultString + char(13) + 'Re-created CertAccountsView view';
+    end;
+
+    if(@Result = 0)    
+    begin
+        if( @isPrinting = 1)
+        begin
+            print char(13) + '------ Re-creating metadata dependent AccountPoolCert index(es) ------'
+        end
+
+		if exists (select 1 from sys.sysindexes where name = 'APC_AcountGroupId_CertEnabled')
+		begin
+			drop index APC_AcountGroupId_CertEnabled on AccountPoolCert;
+		end
+		
+		execute FS_CreateIndexOnAccountPoolCert;
+		
+		set @ResultString = @ResultString + char(13) + 'Re-created metadata dependent AccountPoolCert index(es)';
+    end;
+
+    if(@Result = 0)
+    begin
+        if ( @isPrinting = 1 )
+        begin
+            print char(13) + '------ Re-creating RuleCertification view -------'
+        end
+        execute FS_CreateRuleCertificationView
+        set @ResultString = @ResultString + char(13) + 'Re-created RuleCertification view';
+    end;
+
+      if(@Result = 0)
+      begin
+          if ( @isPrinting = 1 )
+          begin
+              print char(13) + '------ Re-creating RULECERTIFICATION metadata -------'
+          end
+          execute FS_RuleCertificationMetadata
+          set @ResultString = @ResultString + char(13) + 'Re-created RULECERTIFICATION metadata';
+      end;
+
+    if(@Result = 0)
+    begin
+        if ( @isPrinting = 1 )
+        begin
+            print char(13) + '------ Re-creating PendingBalanceView view -------'
+        end
+        execute FS_CreatePendingBalanceView
+        set @ResultString = @ResultString + char(13) + 'Re-created PendingBalanceView view';
+    end;
+
+    if(@Result = 0)
+    begin
+        if ( @isPrinting = 1 )
+        begin
+            print char(13) + '------ Re-creating PENDINGBALANCEVIEW metadata -------'
+        end
+        execute FS_PendingBalanceViewMetadata
+        set @ResultString = @ResultString + char(13) + 'Re-created PENDINGBALANCEVIEW metadata';
+    end;
+
+	-- Call FS_AddMissingSegmentColumns at the end!
+	
+    if(@Result = 0)
+    begin
+        if ( @isPrinting = 1 )
+        begin
+            print char(13) + '------ Re-creating Segment Field Metadata ------'
+        end
+        execute FS_AddMissingSegmentColumns 
+        set @ResultString = @ResultString + char(13) + 'Re-created Segment metadata in views/tables';
+    end;
+
+    if(@Result = 0)    
+    begin
+        if(upper(@Operation) = 'ADD')
+            set @ResultString = @ResultString + char(13) + 'Segment column ''' + @FieldDisplayName + ''' has been successfully added!';
+        else
+            set @ResultString = @ResultString + char(13) + 'Segment column ''' + @FieldDisplayName + ''' has been successfully updated!';
+    end     
+    
+
+    return;
+    
+end try
+begin catch
+    set @Result       = @@ERROR;
+    set @ResultString = ERROR_MESSAGE();
+    return;
+end catch
+end
+go
+
+GRANT EXECUTE ON dbo.FS_AddUpdateCertCustomField to SqlUsers
+go
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_RuleCertificationMetadata]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	drop procedure [dbo].[FS_RuleCertificationMetadata];
+GO
+
+create procedure [dbo].[FS_RuleCertificationMetadata]
+as
+begin
+begin try
+    set nocount on
+    declare @StartingId integer;
+
+    delete from Metadata where BusinessObject = 'RULECERTIFICATION' and MetadataId >= 4915000;
+
+   -- we start with the first unused Id in the range 4915000 - 4915999
+    select @StartingId = max(MetadataId) from Metadata where MetadataId between 4915000 and 4915999;
+    
+    if(@StartingId is null)
+    begin
+    	set @StartingId = 4915000
+    end	
+
+    INSERT INTO Metadata (METADATAID, LOGICALID ,SEQUENCENUM ,COMPANYID, CLIENTDATA, BUSINESSOBJECT, TABLENAME, ELEMENTNAME, PHYSICALNAME, REQUIRED, EDITABLE,MATCHABLE, VIEWABLE, IMPORTABLE, UPDATABLE, DEFAULTSORT, TYPE, LENGTH, DECIMALS, MINIMUM, MAXIMUM,
+            DEFAULTFUNCTION, CLIENTBATCHSIZE, USEPROFILE,FOREIGNOBJECTNAME, FOREIGNELEMENTNAME, FOREIGNKEYNAME, FOREIGNELEMENTTYPE, FOREIGNKEYTYPE, FOREIGNORDERBY, FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT)
+    select
+    @StartingId + row_number() over (order by MetadataId), LOGICALID ,SEQUENCENUM ,COMPANYID, CLIENTDATA, 'RULECERTIFICATION', 'RULECERTIFICATION', ELEMENTNAME, PHYSICALNAME, REQUIRED, EDITABLE,MATCHABLE, VIEWABLE, IMPORTABLE, UPDATABLE, DEFAULTSORT, TYPE, LENGTH, DECIMALS, MINIMUM, MAXIMUM,
+            DEFAULTFUNCTION, CLIENTBATCHSIZE, USEPROFILE,FOREIGNOBJECTNAME, FOREIGNELEMENTNAME, FOREIGNKEYNAME, FOREIGNELEMENTTYPE, FOREIGNKEYTYPE, FOREIGNORDERBY, FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT
+    from Metadata where BusinessObject = 'ACCOUNTCERTBALANCE' and MetadataId >= 4900000;
+ 
+ return;   
+end try
+begin catch
+    declare @ErrorMessage nvarchar(max), @ErrorSeverity int, @ErrorState int;
+    select @ErrorMessage = ERROR_MESSAGE() + ' Line ' + cast(ERROR_LINE() as nvarchar(5)), @ErrorSeverity = ERROR_SEVERITY(), @ErrorState = ERROR_STATE();
+    raiserror (@ErrorMessage, @ErrorSeverity, @ErrorState);
+end catch
+end
+go
+
+GRANT EXECUTE ON dbo.FS_RuleCertificationMetadata to SqlUsers
+go
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[FS_PendingBalanceViewMetadata]') and OBJECTPROPERTY(id, N'IsProcedure') = 1)
+	drop procedure [dbo].[FS_PendingBalanceViewMetadata];
+GO
+
+create procedure [dbo].[FS_PendingBalanceViewMetadata]
+as
+begin
+begin try
+    set nocount on
+    declare @StartingId integer;
+
+    delete from Metadata where BusinessObject = 'PENDINGBALANCEVIEW' and MetadataId >= 4912000;
+
+   	-- we start with the first unused Id in the range 4912000 - 4912999
+    select @StartingId = max(MetadataId) from Metadata where MetadataId between 4912000 and 4912999;
+
+    if(@StartingId is null)
+    begin
+    	set @StartingId = 4912000
+    end	
+
+    INSERT INTO Metadata (METADATAID, LOGICALID ,SEQUENCENUM ,COMPANYID, CLIENTDATA, BUSINESSOBJECT, TABLENAME, ELEMENTNAME, PHYSICALNAME, REQUIRED, EDITABLE,MATCHABLE, VIEWABLE, IMPORTABLE, UPDATABLE, DEFAULTSORT, TYPE, LENGTH, DECIMALS, MINIMUM, MAXIMUM,
+            DEFAULTFUNCTION, CLIENTBATCHSIZE, USEPROFILE,FOREIGNOBJECTNAME, FOREIGNELEMENTNAME, FOREIGNKEYNAME, FOREIGNELEMENTTYPE, FOREIGNKEYTYPE, FOREIGNORDERBY, FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT)
+    select
+    @StartingId + row_number() over (order by MetadataId), LOGICALID ,SEQUENCENUM ,COMPANYID, CLIENTDATA, 'PENDINGBALANCEVIEW', 'PENDINGBALANCEVIEW', ELEMENTNAME, PHYSICALNAME, REQUIRED, EDITABLE,MATCHABLE, VIEWABLE, IMPORTABLE, UPDATABLE, DEFAULTSORT, TYPE, LENGTH, DECIMALS, MINIMUM, MAXIMUM,
+            DEFAULTFUNCTION, CLIENTBATCHSIZE, USEPROFILE,FOREIGNOBJECTNAME, FOREIGNELEMENTNAME, FOREIGNKEYNAME, FOREIGNELEMENTTYPE, FOREIGNKEYTYPE, FOREIGNORDERBY, FOREIGNOBJECTPARENTNAME,FOREIGNOBJECTPHYSICALNAME,FOREIGNELEMENTLENGTH,OUTERJOIN,DISPLAYNAME,TRANSLATETYPE,TRANSLATEONCLIENT
+    from Metadata where BusinessObject = 'ACCOUNTCERTBALANCE' and MetadataId >= 4900000;
+ 
+ return;   
+end try
+begin catch
+    declare @ErrorMessage nvarchar(max), @ErrorSeverity int, @ErrorState int;
+    select @ErrorMessage = ERROR_MESSAGE() + ' Line ' + cast(ERROR_LINE() as nvarchar(5)), @ErrorSeverity = ERROR_SEVERITY(), @ErrorState = ERROR_STATE();
+    raiserror (@ErrorMessage, @ErrorSeverity, @ErrorState);
+end catch
+end
+go
+
+GRANT EXECUTE ON dbo.FS_PendingBalanceViewMetadata to SqlUsers
+go
+
+if exists (select * from dbo.sysobjects where id = object_id(N'[dbo].[CustomResourceString]') and OBJECTPROPERTY(id, N'IsView') = 1)
+    drop view CustomResourceString
+GO
+
+create view CustomResourceString (CustomResourceStringId, CompanyId, ResourceId, ResourceString, TableName, TranslateType) as
+with
+      CustomFDNames as
+    (
+    select f.Id, f.CompanyId, f.TableName, f.FieldName, f.CustomName, 0 as TranslateType
+    from FieldDesc f
+    where
+            (
+                  f.TableName in ('Item', 'Trade')
+                  and
+                  Id > 1000
+            )
+            or
+            (
+                  f.TableName = 'AccountPool' and
+                  (Id = 337 and CustomName <> 'User Text 01') or
+                  (Id = 338 and CustomName <> 'User Text 02') or
+                  (Id = 339 and CustomName <> 'User Text 03') or
+                  (Id = 340 and CustomName <> 'User Text 04') or
+                  (Id = 341 and CustomName <> 'User Text 05') or
+                  (Id = 342 and CustomName <> 'User Text 06') or
+                  (Id = 343 and CustomName <> 'User Text 07') or
+                  (Id = 344 and CustomName <> 'User Text 08') or
+                  (Id = 345 and CustomName <> 'User Text 09') or
+                  (Id = 346 and CustomName <> 'User Text 10') or
+                  (Id = 347 and CustomName <> 'User Date 1') or
+                  (Id = 348 and CustomName <> 'User Date 2') or
+                  (Id = 349 and CustomName <> 'User Date 3')
+            )
+            or
+            (
+                  f.TableName = 'Account' and
+                  (Id = 382 and CustomName <> 'User Text 01') or
+                  (Id = 383 and CustomName <> 'User Text 02') or
+                  (Id = 384 and CustomName <> 'User Text 03') or
+                  (Id = 385 and CustomName <> 'User Text 04') or
+                  (Id = 386 and CustomName <> 'User Text 05') or
+                  (Id = 387 and CustomName <> 'User Text 06') or
+                  (Id = 388 and CustomName <> 'User Text 07') or
+                  (Id = 389 and CustomName <> 'User Text 08') or
+                  (Id = 390 and CustomName <> 'User Text 09') or
+                  (Id = 391 and CustomName <> 'User Text 10') or
+                  (Id = 392 and CustomName <> 'User Date 1') or
+                  (Id = 393 and CustomName <> 'User Date 2') or
+                  (Id = 394 and CustomName <> 'User Date 3')
+            )
+            or
+            (
+                  f.CompanyId > 0 
+                  and CustomName not in 
+                  (select CustomName from FieldDesc b where upper(f.TableName) = upper(b.TableName) and upper(f.FieldName) = upper(b.FieldName) and b.CompanyId = -1)
+            )
+    ),
+      MetadataList as
+    (select  distinct c.CompanyId, m1.BusinessObject, m1.LogicalId, c.CustomName, m1.TranslateType
+    from Metadata m1
+    join CustomFDNames c on 
+    (m1.BusinessObject  = 'ACCOUNTPOOL' and c.TableName = 'AccountPool' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ACCOUNT' and c.TableName = 'Account' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ITEM' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ARCHIVEITEM' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ITEMHISTORY' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    --(m1.BusinessObject  = 'CASEITEM' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'CM_ITEM' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'CM_ITEM_ACROSSCOMPANIES' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ITEMCOMPOSITE' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ITEMMATCHED' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'PARENTCHILDITEM' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'SPLITITEMCHILD' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'SPLITITEMPARENT' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ASATITEM' and c.TableName = 'Item' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'TRADE' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ARCHIVETRADE' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'SPLITTRADECHILD' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'SPLITTRADEPARENT' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'ASATTRADE' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'CM_TRADE' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'CM_TRADE_ACROSSCOMPANIES' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'PARENTCHILDTRADE' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'TRADECASEITEM' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'TRADEHISTORY' and c.TableName = 'Trade' and m1.LogicalId = c.Id) or
+    (m1.BusinessObject  = 'TRADEMATCHED' and c.TableName = 'Trade' and m1.LogicalId = c.Id) 
+    union all
+    select co.Id, m2.BusinessObject, m2.MetadataId, m2.DisplayName, m2.TRANSLATETYPE
+    from Company co, Metadata m2 where m2.BusinessObject IN ('RECONCILINGITEM','CERTACCOUNTPOOL','FRONTIERCERTIFICATION','ACCOUNTCERTBALANCE','ACCOUNTCERTBALANCEGRID','BULKCERTBALANCEPOOL','RECITEMSGRID','RULECERTIFICATION','PENDINGBALANCEVIEW') and m2.MetadataId >= 4900000
+    union all
+    select co.Id, m2.BusinessObject, m2.MetadataId, m2.DisplayName, m2.TRANSLATETYPE
+    from Company co, Metadata m2 where m2.BusinessObject in ('CERTACCOUNTPOOLGROUP','CERTACCOUNTINFO','CERTACCOUNTSVIEW') and m2.PhysicalName in (select m3.PhysicalName from Metadata m3 where m3.BusinessObject  = 'CERTACCOUNTPOOL' and m3.MetadataId >= 4900000))
+select
+    row_number() over(order by CompanyId, BusinessObject, LogicalId),
+    CompanyId,
+    BusinessObject + convert(varchar,LogicalId), 
+    CustomName, BusinessObject, TranslateType
+    from MetadataList;
+GO
+
+grant select                                     on CustomResourceString to SqlUsers;
+go
+
+
+DECLARE
+    @isTest integer,
+    @DisplaySQL integer;
+BEGIN
+    print CONVERT(char(20),getdate(),109) + 'Converting balance data for Reconciliation Account certifications to AccountCertBalance Table.'
+    exec UPGRADEACCOUNTCERTBALANCE;
+        
+    print CONVERT(char(20),getdate(),109) + 'Converted balance data for Reconciliation Account certifications to AccountCertBalance Table.'
+    
+    print CONVERT(char(20),getdate(),109) + 'Recreating ReconcilingGridItem view.'
+    
+    set @isTest     = 0;
+    set @DisplaySQL = 0;
+    
+    exec UPGRADECUSTOMFIELD;
+    exec FS_CreateRecItemFieldTrigger       @isTest, @DisplaySQL;
+    exec FS_CreateViewReconcilingGridItem   @isTest, @DisplaySQL;
+    exec FS_CreateViewRecItemsGrid          @isTest, @DisplaySQL;
+
+    print CONVERT(char(20),getdate(),109) + 'Recreated ReconcilingGridItem view.'
+
+    print CONVERT(char(20),getdate(),109) + 'Creating Certification-related views.'
+
+    exec FS_CreateViewBULKCERTBALANCEPOOL   @isTest, @DisplaySQL;
+    exec FS_CreateViewCERTACCOUNTPOOL       @isTest, @DisplaySQL;
+    exec FS_CreateViewCertificationEx       @isTest, @DisplaySQL;
+    exec FS_CreateViewFrontierCertification @isTest, @DisplaySQL;
+    exec FS_ViewFrontierCertReport          @isTest, @DisplaySQL;
+    exec FS_CreateViewMyWorkCertAsOwner     @isTest, @DisplaySQL;
+    exec FS_CreateViewMyWorkCertAsBackup    @isTest, @DisplaySQL;
+    exec FS_CreateViewMyRespCertAsOwner     @isTest, @DisplaySQL;
+    exec FS_CreateViewMyRespCertAsBackup    @isTest, @DisplaySQL;
+    exec FS_CreateViewMyCertsAsMonitor      @isTest, @DisplaySQL;
+    exec FS_CreateViewMyCertsAsQaReviewer   @isTest, @DisplaySQL;
+    exec FS_CreateViewMyCertsGauge          @isTest, @DisplaySQL;
+    exec FS_CreateViewMyCertsMonitorGauge   @isTest, @DisplaySQL;
+
+    print CONVERT(char(20),getdate(),109) + 'Created Certification-related views.'
+
+    print CONVERT(char(20),getdate(),109) + 'Creating Negative Amounts dynamic views.'
+    
+    exec FS_CreateViewItemNegAmts           @isTest, @DisplaySQL;
+    exec FS_CreateViewItemHistNegAmts       @isTest, @DisplaySQL;
+    exec FS_CreateViewItemCompNegAmts       @isTest, @DisplaySQL;
+    exec FS_CreateViewAsAtItemNegAmts       @isTest, @DisplaySQL;
+
+    print CONVERT(char(20),getdate(),109) + 'Created Negative Amounts dynamic views.'
+END
+GO
+
+DELETE FROM SYSCONFIGATTRIBUTES WHERE Attribute = 'Frontier Version Number'
+INSERT INTO SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+    values (-2, 'Frontier Version Number', NULL, NULL, NULL, 'Version 2024.2', '01/01/1970', 'string', 'Frontier Version Number for display in the About dialog');
+GO
+
+-- Increase Height of Reconciliation Summary Dialog Box to 425px
+UPDATE MENUENTRY SET WINDOWPROPERTIES = 'width=720,height=425,left=340,top=48,resizable=yes' WHERE MENUENTRYID = 1122 AND MENUID = 1036 AND WINDOWPROPERTIES = 'width=720,height=390,left=340,top=48,resizable=yes';
+GO
+
+UPDATE MENUENTRY SET WINDOWPROPERTIES = 'width=720,height=425,left=340,top=48,resizable=yes' WHERE MENUENTRYID = 112040 AND MENUID = 1271 AND WINDOWPROPERTIES = 'width=720,height=390,left=340,top=48,resizable=yes';
+GO
+
+UPDATE MENUENTRY SET WINDOWPROPERTIES = 'centered=yes,width=720,height=425,left=340,top=48,resizable=no' WHERE MENUENTRYID = 12310 AND MENUID = 10301 AND WINDOWPROPERTIES = 'centered=yes,width=720,height=390,left=340,top=48,resizable=no';
+GO
+
+UPDATE MENUENTRY SET WINDOWPROPERTIES = 'width=720,height=425,left=340,top=48,resizable=yes' WHERE MENUENTRYID = 4001122 AND MENUID = 4001036 AND WINDOWPROPERTIES = 'width=720,height=390,left=340,top=48,resizable=yes';
+GO
+
+-- ******************************
+-- CashAccountBalance
+-- ******************************
+ALTER TABLE CashAccountBalanceUpdated NOCHECK CONSTRAINT CashABU_CashABId_FK
+ALTER TABLE cashaccountbalance DISABLE TRIGGER td_cashaccountbalance_first;
+SET IDENTITY_INSERT CashAccountBalance ON
+GO
+
+DELETE FROM CashAccountBalance WHERE Id = -1;
+ALTER TABLE cashaccountbalance ENABLE TRIGGER td_cashaccountbalance_first;
+
+GO
+--
+INSERT INTO CASHACCOUNTBALANCE (ID,RECONID,ACCOUNTID ,DATEX ,BALANCE ,CURRENCY ,IMPORTID ,FLAGS ,EQDATEX ,EQBALANCE ,EQCURRENCY ,USERTEXT1 ,USERTEXT2 ,USERAMOUNT1 ,USERAMOUNT2 ,USERNUM1 ,USERNUM2 ,SYSTEMBALANCE ,PERIODID, FLOAT1, FLOAT2, CUMULATIVE )
+VALUES (-1,-1 ,-1 , 'Jan 1, 1970 12:00:00 AM' ,0 ,'   ' ,-1 ,0 ,'Jan 1, 1970 12:00:00 AM',0 ,'   ' ,'' ,'' ,0 ,0 ,0 ,0 ,0 ,-1, 0, 0, 0  );
+GO
+
+ALTER TABLE CashAccountBalanceUpdated CHECK CONSTRAINT CashABU_CashABId_FK
+SET IDENTITY_INSERT CashAccountBalance OFF
+GO
+--
+
+-- ******************************
+-- MENUENTRY
+-- ******************************
+DELETE FROM MENUENTRY WHERE MENUENTRYID = 4001122
+
+--Right Click for Cert Related History grid
+--                             MENUENTRYID  MENUID   PARENTID  POSITION  SEPARATER  DISPLAYTEXT                         URL                                                                                                                                                     PERMISSION  SELECTEDONLY  PANELID  BUSINESSOBJECT             WINDOWPROPERTIES                                                                                                                          OPERATION                SHORTCUTIND     DEFAULTOPTION    ICON       TYPE            MENUTYPE                           SHORTCUTBONAME
+--                             -----------  ------   --------  --------  ---------  ----------------------------------  ------------------------------------------------------------------------------------------------------------------------------------------------------  ----------  ------------  -------  -------------------------  ----------------------------------------------------------------------------------------------------------------------------------------  -----------------------  --------------  ---------------  ---------  --------------  --------------                     ------------------------
+INSERT INTO MENUENTRY VALUES( 4001122,      4001036,   -1,       -1,        0,         'View Recon Summary',              '/servlet/DataServlet?displayPage=/_Cash/_Misc/Reconciliation/ReconCashSummaryDisplay.jsp',                                                                            -1,      0,            1124,    'CASHRECONCILIATIONHISTORY',    'width=720,height=425,left=340,top=48,resizable=yes',            'reconSummary_1',              0 ,             1,             72,       'Default',    'ACCOUNTCERT'   ,                  'ACCOUNTCERTMENUSHORTCUT');
+
+
+DELETE FROM MENUENTRY WHERE MENUENTRYID = 1122
+
+--Right Click for ReconHistory grid
+--                             MENUENTRYID  MENUID  PARENTID  POSITION  SEPARATER  DISPLAYTEXT                              URL                                                                                                                                                                     PERMISSION  SELECTEDONLY    PANELID         BUSINESSOBJECT                  WINDOWPROPERTIES                                                                                                                        OPERATION                       SHORTCUTIND     DEFAULTOPTION       ICON        TYPE            MENUTYPE
+--                             -----------  ------  --------  --------  ---------  ---------------------------------------  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------  ----------  --------------  --------------  ------------------------------  --------------------------------------------------------------------------------------------------------------------------------------  ------------------------------  --------------  ------------------  ---------  --------------  -----------
+INSERT INTO MENUENTRY VALUES(  1122,        1036,   -1,       -1,        0,         'View Recon Summary',              '/servlet/DataServlet?displayPage=/_Cash/_Misc/Reconciliation/ReconCashSummaryDisplay.jsp',                                                                                  -1,         0,              1124,           'CASHRECONCILIATIONHISTORY',    'width=720,height=425,left=340,top=48,resizable=yes',                                                                                   'reconSummary_1',               0 ,             1,                  72,       'Default',       'CASH'   ,                  'MENUSHORTCUT');
+DELETE FROM MENUENTRY WHERE MENUENTRYID = 112040
+-- right click on CASHRECONCILIATIONHISTORYSTAT Grid
+--                             MENUENTRYID  MENUID  PARENTID  POSITION  SEPARATER  DISPLAYTEXT                        URL                                                                                                                                                                   PERMISSION  SELECTEDONLY  PANELID  BUSINESSOBJECT                 WINDOWPROPERTIES                                                                                                                                                            OPERATION                   SHORTCUTIND DEFAULTOPTION  ICON      TYPE            MENUTYPE
+--                             -----------  ------  --------  --------  ---------  ---------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------                ----------  ------------  -------  -------------------------      ----------------------------------------------------------------------------------------------------------------------------------------  -----------------------        --------------- -------------- --------- -------------- -----------
+INSERT INTO MENUENTRY VALUES(  112040,        1271,   -1,       -1,        0,         'View Recon Summary',              '/servlet/DataServlet?displayPage=/_Cash/_Misc/Reconciliation/ReconCashSummaryDisplay.jsp',                                                                                     -1,      0,            1124,    'CASHRECONCILIATIONHISTORYSTAT',   'width=720,height=425,left=340,top=48,resizable=yes',             'reconSummary_1',                    0 ,             1,             72,       'Default',       'CASH'   ,                  'MENUSHORTCUT');
+
+
+DELETE FROM MENUENTRY WHERE MENUENTRYID = 12310
+
+--                             MENUENTRYID  MENUID  PARENTID  POSITION  SEPARATER  DISPLAYTEXT                        URL                                                                                                                                                                   PERMISSION  SELECTEDONLY  PANELID  BUSINESSOBJECT                 WINDOWPROPERTIES                                                                                                                                                            OPERATION                   SHORTCUTIND DEFAULTOPTION  ICON      TYPE            MENUTYPE
+--                             -----------  ------  --------  --------  ---------  ---------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------                ----------  ------------  -------  -------------------------      ----------------------------------------------------------------------------------------------------------------------------------------  -----------------------        --------------- -------------- --------- -------------- -----------
+INSERT INTO MENUENTRY VALUES(  12310,      10301,   -1,       0,        0,         'View Recon Summary for Highlighted',    '/servlet/DataServlet?displayPage=/_Cash/_Misc/Reconciliation/ReconCashSummaryDisplay.jsp',                                                                -1,        0,            1124,           'CASHRECONCILIATIONHISTORY',    'centered=yes,width=720,height=425,left=340,top=48,resizable=no',          'reconSummary_1',               0 ,             1,             -1,         'Default',        'CASH',                         'MENUSHORTCUT');
+
+-- REASONCODES Data
+--
+DELETE FROM METADATA WHERE BUSINESSOBJECT = 'REASONCODES' AND METADATAID = 5352
+--
+--
+--                            METADATAID  LOGICALID   SEQUENCENUM COMPANYID   CLIENTDATA  BUSINESSOBJECT                         TABLENAME                              ELEMENTNAME                            PHYSICALNAME                           REQUIRED    EDITABLE    MATCHABLE   VIEWABLE    IMPORTABLE  UPDATABLE DEFAULTSORT TYPE                    LENGTH      DECIMALS    MINIMUM                    MAXIMUM                    DEFAULTFUNCTION                                                                                         CLIENTBATCHSIZE USEPROFILE FOREIGNOBJECTNAME                      FOREIGNELEMENTNAME                     FOREIGNKEYNAME                         FOREIGNELEMENTTYPE      FOREIGNKEYTYPE          FOREIGNORDERBY FOREIGNOBJECTPARENTNAME                FOREIGNOBJECTPHYSICALNAME              FOREIGNELEMENTLENGTH OUTERJOIN   DISPLAYNAME                       TRANSLATETYPE         TRANSLATEONCLIENT
+----------------------------- ----------- ----------- ----------- ----------- ----------- -------------------------------------- -------------------------------------- -------------------------------------- -------------------------------------- ----------- ----------- ----------- ----------- ----------- --------- ----------- ----------------------- ----------- ----------- -------------------------- -------------------------- ------------------------------------------------------------------------------------------------------- --------------- ---------- -------------------------------------- -------------------------------------- -------------------------------------- ----------------------- ----------------------- -------------- -------------------------------------- -------------------------------------- -------------------- ----------- ------------------------------------------------------------------------------------------------------ ----
+INSERT INTO METADATA VALUES (       5352,          0,          0,          1,          1, 'REASONCODES',                         'ReasonCodes',                         'NAME',                                'Name',                                         1,          1,          0,          1,          0,        1,          1, 'Text',                         50,          0,                      NULL,                      NULL, NULL,                                                                                                             NULL,         0, NULL,                                  NULL,                                  NULL,                                  NULL,                   NULL,                   NULL,          NULL,                                  NULL,                                                 NULL,          0, 'Name'          ,                            0,  1  );
+GO
+
+
+-- ** Delta Script required to create Frontier Permissions for the Frontier database  **
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTOWNER' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTOWNER' AND PERMISSIONID = 4000022;
+
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AMORTIZATIONTEMPLATE' AND PERMISSIONID = 4000043;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AMORTIZATIONTEMPLATE' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AMORTIZATIONTEMPLATE' AND PERMISSIONID = 4000022;
+						
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTTEMPLATE' AND PERMISSIONID = 4000000;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTTEMPLATE' AND PERMISSIONID = 4000011;
+DELETE FROM FrontierPermission where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AGINGGROUPNAME' AND PERMISSIONID = 7;
+						
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTTEMPLATENAME' AND PERMISSIONID = 4000000;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTTEMPLATENAME' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTTEMPLATENAME' AND PERMISSIONID = 4000022;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTPROFILENAME' AND PERMISSIONID = 4000000;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTPROFILENAME' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTPROFILENAME' AND PERMISSIONID = 4000022;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'RISKRANKINGNAME' AND PERMISSIONID = 4000000;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'RISKRANKINGNAME' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'RISKRANKINGNAME' AND PERMISSIONID = 4000022;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'QACHECKLISTNAME' AND PERMISSIONID = 4000000;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'QACHECKLISTNAME' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'QACHECKLISTNAME' AND PERMISSIONID = 4000022;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AMORTIZATIONTEMPLATENAME' AND PERMISSIONID = 4000043;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AMORTIZATIONTEMPLATENAME' AND PERMISSIONID = 4000011;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'AMORTIZATIONTEMPLATENAME' AND PERMISSIONID = 4000022;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'WORKGROUPNAME' AND PERMISSIONID = -1;
+
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CURRNCYABBR4' AND PERMISSIONID = 4000036;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTACCOUNTPOOLNAME' AND PERMISSIONID = 4000036;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTACCOUNTCOMPANYNAME' AND PERMISSIONID = 4000036;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTOWNER' AND PERMISSIONID = 4000036;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'CERTTEMPLATE' AND PERMISSIONID = 4000036;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'QACHECKLISTNAME' AND PERMISSIONID = 4000036;
+DELETE FROM FRONTIERPERMISSION where METHODNAME = 'GetFilteredListJSON' AND BUSINESSOBJECTNAME = 'RISKRANKINGNAME' AND PERMISSIONID = 4000036;
+
+insert into FrontierPermission (MethodName, BusinessObjectName, PermissionId, ActionDescription) values ('GetFilteredListJSON',  'AGINGGROUPNAME',        7,'Edit item groups using aging group criteria' );
+
+-- Workgroups                                                                
+
+insert into FrontierPermission (MethodName, BusinessObjectName, PermissionId, ActionDescription) values ('GetFilteredListJSON','CERTOWNER',   4000011, 'view filter dropdown');
+insert into FrontierPermission (MethodName, BusinessObjectName, PermissionId, ActionDescription) values ('GetFilteredListJSON','CERTOWNER',   4000022, 'view filter dropdown');
+
+-- Task by Owner Report
+
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) VALUES('GetFilteredListJSON','AMORTIZATIONTEMPLATE',4000043,'AmortizationTemplate',NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) VALUES('GetFilteredListJSON','AMORTIZATIONTEMPLATE',4000011,'AmortizationTemplate',NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) VALUES('GetFilteredListJSON','AMORTIZATIONTEMPLATE',4000022,'AmortizationTemplate',NULL,NULL,NULL,'list certification templates in filters');
+
+-- Cert and Cert Accounts filter pane dropdowns
+
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTTEMPLATE',4000000,NULL,NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTTEMPLATE',4000011,NULL,NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTTEMPLATENAME',4000000,NULL,NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTTEMPLATENAME',4000011,NULL,NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTTEMPLATENAME',4000022,NULL,NULL,NULL,NULL,'list certification templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTPROFILENAME',4000000,NULL,NULL,NULL,NULL,'list cert profiles in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTPROFILENAME',4000011,NULL,NULL,NULL,NULL,'list cert profiles in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','CERTPROFILENAME',4000022,NULL,NULL,NULL,NULL,'list cert profiles in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','RISKRANKINGNAME',4000000,NULL,NULL,NULL,NULL,'list risk ranks in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','RISKRANKINGNAME',4000011,NULL,NULL,NULL,NULL,'list risk ranks in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','RISKRANKINGNAME',4000022,NULL,NULL,NULL,NULL,'list risk ranks in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','QACHECKLISTNAME',4000000,NULL,NULL,NULL,NULL,'list qa checklist templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','QACHECKLISTNAME',4000011,NULL,NULL,NULL,NULL,'list qa checklist templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','QACHECKLISTNAME',4000022,NULL,NULL,NULL,NULL,'list qa checklist templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','AMORTIZATIONTEMPLATENAME',4000043,NULL,NULL,NULL,NULL,'list amortization templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','AMORTIZATIONTEMPLATENAME',4000011,NULL,NULL,NULL,NULL,'list amortization templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','AMORTIZATIONTEMPLATENAME',4000022,NULL,NULL,NULL,NULL,'list amortization templates in filters');
+INSERT INTO FRONTIERPERMISSION (METHODNAME,BUSINESSOBJECTNAME,PERMISSIONID,TABLENAME,IDFIELD,PARAM1FIELD,PARAM2FIELD,ACTIONDESCRIPTION) values ('GetFilteredListJSON','WORKGROUPNAME',-1,NULL,NULL,NULL,NULL,'list assignees in filters');
+
+-- QA reviewer dropdowns
+
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','CURRNCYABBR4',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','CERTACCOUNTPOOLNAME',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','CERTACCOUNTCOMPANYNAME',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','CERTOWNER',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','CERTTEMPLATE',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','QACHECKLISTNAME',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetFilteredListJSON','RISKRANKINGNAME',4000036,NULL,NULL,NULL,NULL,'view filter dropdown');
+
+exec sp_refreshview FIELDDESC_METADATA
+GO
+
+-- Remove business age fields from display
+if exists (select * from METADATA where METADATAID in (4000844,4000845,4100060,4100061))
+begin
+	update METADATA set viewable=0 where METADATAID in (4000844,4000845,4100060,4100061)
+end
+
+if exists (select * from CertRecItemTemplate where FieldId in (4000844,4000845))
+begin
+	delete from CertRecItemTemplate where FieldId in (4000844,4000845)
+end
+
+if exists (select * from UserProfiles where Section='RECITEMSGRIDQuery' and ProfileKey='ChosenColumns' and (entry like '%BUSINESSAGE%' or entry like '%BUSINESSAGINGGROUPID%'))
+begin
+	update UserProfiles set entry=replace(entry,'BUSINESSAGINGGROUPID,', '') where Section='RECITEMSGRIDQuery' and ProfileKey='ChosenColumns' and entry like '%BUSINESSAGINGGROUPID%'
+
+	update UserProfiles set entry=replace(entry,'BUSINESSAGE,', '') where Section='RECITEMSGRIDQuery' and ProfileKey='ChosenColumns' and entry like '%BUSINESSAGE%'
+end
+
+
+-- Pause existing Reconciling Item Aging Jobs
+
+UPDATE ScheduledJob SET Status = Status + 400 WHERE JobType = 44 AND Status in (1,4,7)
+UPDATE ScheduledJob SET Status = 402 WHERE JobType = 44 AND Status in (2,3)
+UPDATE ScheduledJob SET Status = 406 WHERE JobType = 44 AND Status in (0,5,6)
+
+DELETE FROM FIELDVALS where ID = 554 and VALUEX = 44;
+
+DELETE FROM TREENODE where DISPLAYTEXT ='Reconciling Item Aging Tasks';
+
+DELETE FROM Priviledges where Id = 30131;
+
+-- Remove the Reconciling Items Business Age Report
+DELETE FROM CERTREPORTJOBFILTER WHERE CertReportJobId IN (select CertReportJobId FROM CertReportJob where ReportDefinitionId IN (SELECT ID from FRONTIERREPORTDEFINITION WHERE CONTEXT = 4000000 AND NAME='Reconciling Items Business Age Report'));
+DELETE FROM CertReportJob where ReportDefinitionId IN (SELECT ID from FRONTIERREPORTDEFINITION WHERE CONTEXT = 4000000 AND NAME='Reconciling Items Business Age Report');
+DELETE FROM FRONTIERREPORTDEFINITION WHERE CONTEXT = 4000000 AND NAME='Reconciling Items Business Age Report';
+
+-- Pause existing Reconciling Items Business Age Report Jobs
+UPDATE sj set Status = Status + 400 FROM ScheduledJob sj INNER JOIN CertReportJob cr ON cr.ScheduledJobId = sj.Id WHERE sj.JobType = 37 AND sj.Status in (1,4,7) AND cr.ReportDefinitionId = 4000008;
+UPDATE sj set Status = 402 FROM ScheduledJob sj INNER JOIN CertReportJob cr ON cr.ScheduledJobId = sj.Id WHERE sj.JobType = 37 AND sj.Status in (2,3) AND cr.ReportDefinitionId = 4000008;
+UPDATE sj set Status = 406 FROM ScheduledJob sj INNER JOIN CertReportJob cr ON cr.ScheduledJobId = sj.Id WHERE sj.JobType = 37 AND sj.Status in (0,5,6) AND cr.ReportDefinitionId = 4000008;
+
+--Increase the import window height to show all controls
+UPDATE MENUENTRY SET WINDOWPROPERTIES ='width=520,height=350,left=315,top=23,toolbar=no,location=no,directories=no,status=no,scrollbars=no,menubar=no,resizable=no' WHERE MENUENTRYID=10024;
+UPDATE MENUENTRY SET WINDOWPROPERTIES ='width=520,height=350,left=315,top=23,toolbar=no,location=no,directories=no,status=no,scrollbars=no,menubar=no,resizable=no' WHERE MENUENTRYID=10025;
+UPDATE MENUENTRY SET WINDOWPROPERTIES ='width=520,height=350,left=315,top=23,toolbar=no,location=no,directories=no,status=no,scrollbars=no,menubar=no,resizable=no' WHERE MENUENTRYID=10026;
+
+-- Remove workbook priviledges
+DELETE FROM Priviledges where Id in (28692,28810);
+
+-- Remove workbook sys config
+DELETE FROM SysConfigAttributes where Attribute = 'Frontier Reconciliation Workbook Maximum Row Count';
+
+---------------------------------------------------------------------------------------------------------------------------------------------
+-- Remove Extended and Snapshot Metadata from RecProfile, CashReconProfile and TradeRecProfile Businessobject
+---------------------------------------------------------------------------------------------------------------------------------------------
+UPDATE METADATA SET REQUIRED = 0, VIEWABLE = 0  WHERE BUSINESSOBJECT = 'RECPROFILE' AND PHYSICALNAME IN ('CaptureExtendedInfo', 'GenerateSnapshot', 'GenerateWorkbook', 'WorkbookTemplateId');
+UPDATE METADATA SET REQUIRED = 0, VIEWABLE = 0  WHERE BUSINESSOBJECT = 'RECPROFILE' AND ELEMENTNAME IN ('GENERATESNAPSHOT',
+                                                                                                        'SNAPCOMPANYINFO',
+                                                                                                        'SNAPPOOLINFO',
+                                                                                                        'SNAPPOOLNOTES',
+                                                                                                        'SNAPPOOLATTACHMENTS',
+                                                                                                        'SNAPACCOUNTS',
+                                                                                                        'SNAPBALANCES',
+                                                                                                        'SNAPPROFILE',
+                                                                                                        'SNAPOS',
+                                                                                                        'SNAPOSNOTES',
+                                                                                                        'SNAPPOSITIONS',
+                                                                                                        'SNAPSECURITIES',
+                                                                                                        'SNAPOSANAL');
+UPDATE METADATA SET REQUIRED = 0, VIEWABLE = 0  WHERE BUSINESSOBJECT = 'CASHRECONPROFILE' AND PHYSICALNAME IN ('CaptureExtendedInfo', 'GenerateSnapshot', 'GenerateWorkbook', 'WorkbookTemplateId');
+UPDATE METADATA SET REQUIRED = 0, VIEWABLE = 0  WHERE BUSINESSOBJECT = 'CASHRECONPROFILE' AND ELEMENTNAME IN ('GENERATESNAPSHOT',
+                                                                                                        'SNAPCOMPANYINFO',
+                                                                                                        'SNAPPOOLINFO',
+                                                                                                        'SNAPPOOLNOTES',
+                                                                                                        'SNAPPOOLATTACHMENTS',
+                                                                                                        'SNAPACCOUNTS',
+                                                                                                        'SNAPBALANCES',
+                                                                                                        'SNAPPROFILE',
+                                                                                                        'SNAPOS',
+                                                                                                        'SNAPOSNOTES',
+                                                                                                        'SNAPPOSITIONS',
+                                                                                                        'SNAPSECURITIES',
+                                                                                                        'SNAPOSANAL');
+UPDATE METADATA SET REQUIRED = 0, VIEWABLE = 0  WHERE BUSINESSOBJECT = 'TRADERECPROFILE' AND PHYSICALNAME IN ('CaptureExtendedInfo', 'GenerateSnapshot', 'GenerateWorkbook', 'WorkbookTemplateId');
+UPDATE METADATA SET REQUIRED = 0, VIEWABLE = 0  WHERE BUSINESSOBJECT = 'TRADERECPROFILE' AND ELEMENTNAME IN ('GENERATESNAPSHOT',
+                                                                                                        'SNAPCOMPANYINFO',
+                                                                                                        'SNAPPOOLINFO',
+                                                                                                        'SNAPPOOLNOTES',
+                                                                                                        'SNAPPOOLATTACHMENTS',
+                                                                                                        'SNAPACCOUNTS',
+                                                                                                        'SNAPBALANCES',
+                                                                                                        'SNAPPROFILE',
+                                                                                                        'SNAPOS',
+                                                                                                        'SNAPOSNOTES',
+                                                                                                        'SNAPPOSITIONS',
+                                                                                                        'SNAPSECURITIES',
+                                                                                                        'SNAPOSANAL');
+
+DELETE MENUENTRY WHERE MENUENTRYID IN (1125, 1126, 4001125) AND BUSINESSOBJECT = 'WORKBOOKDETAIL';
+DELETE MENUENTRY WHERE MENUENTRYID IN (1011301, 1011302) AND BUSINESSOBJECT = 'TRADEWORKBOOKDETAIL';
+
+-- Remove explicit transfer of workbook templates and extended field data from Transsfer Manager
+if exists ( select * from dbo.sysobjects where id = object_id(N'[dbo].TransferObjects') AND OBJECTPROPERTY(id, N'IsUserTable') = 1)
+begin
+	update TransferObjects set ExplicitSelection=0 where Name='Workbook Template';
+	delete from TransferObjects where Name = 'RecProfile Ext Field';
+end
+
+-- Remove workbook and snapshot columns from Transfer Manager
+if exists ( select * from dbo.sysobjects where id = object_id(N'[dbo].TransferColumns') AND OBJECTPROPERTY(id, N'IsUserTable') = 1)
+begin
+	delete from TransferColumns where ObjectName = 'Reconciliation Profile' and ColumnName in ('CaptureExtendedInfo','GenerateSnapshot','GenerateWorkbook','WorkbookTemplateId','IncludeCompanyInfo','IncludePoolInfo','IncludePoolNotes','IncludePoolAttachments','IncludeAccounts','IncludeBalances','IncludeProfile','IncludeOS','IncludeOSNotes','IncludePreviousRecSummaries','IncludeSecurities','IncludeOSAnal','IncludePositions')
+	delete from TransferColumns where ObjectName = 'RecProfile Ext Field'
+end
+
+-- Set defaults for workbook and snapshot columns in RecProfile
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='CaptureExtendedInfo') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_CaptureExtendedInfo DEFAULT 0 FOR CaptureExtendedInfo
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='GenerateSnapshot') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_GenerateSnapshot DEFAULT 0 FOR GenerateSnapshot
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='GenerateWorkbook') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_GenerateWorkbook DEFAULT 0 FOR GenerateWorkbook
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='WorkbookTemplateId') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_WorkbookTemplateId DEFAULT -1 FOR WorkbookTemplateId
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeCompanyInfo') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeCompanyInfo DEFAULT 0 FOR IncludeCompanyInfo
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludePoolInfo') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludePoolInfo DEFAULT 0 FOR IncludePoolInfo
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludePoolNotes') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludePoolNotes DEFAULT 0 FOR IncludePoolNotes
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludePoolAttachments') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludePoolAttachments DEFAULT 0 FOR IncludePoolAttachments
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeAccounts') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeAccounts DEFAULT 0 FOR IncludeAccounts
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeBalances') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeBalances DEFAULT 0 FOR IncludeBalances
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeProfile') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeProfile DEFAULT 0 FOR IncludeProfile
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeOS') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeOS DEFAULT 0 FOR IncludeOS
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeOSNotes') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeOSNotes DEFAULT 0 FOR IncludeOSNotes
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludePreviousRecSummaries') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludePreviousRecSummaries DEFAULT 0 FOR IncludePreviousRecSummaries
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeSecurities') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeSecurities DEFAULT 0 FOR IncludeSecurities
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludeOSAnal') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludeOSAnal DEFAULT 0 FOR IncludeOSAnal
+end
+
+if (select column_default from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME='RecProfile' and COLUMN_NAME='IncludePositions') is null
+begin
+	ALTER TABLE recprofile ADD CONSTRAINT df_IncludePositions DEFAULT 0 FOR IncludePositions
+end
+
+-- Set workbook and snapshot columns in RecProfile to defaults
+update RecProfile set CaptureExtendedInfo=0, GenerateSnapshot=0, GenerateWorkbook=0, WorkbookTemplateId=-1, IncludeCompanyInfo=0, IncludePoolInfo=0, 
+	IncludePoolNotes=0, IncludePoolAttachments=0, IncludeAccounts=0, IncludeBalances=0, IncludeProfile=0, IncludeOS=0, IncludeOSNotes=0,
+	IncludePreviousRecSummaries=0, IncludeSecurities=0, IncludeOSAnal=0, IncludePositions=0
+
+-- Cleanup Performance Manager
+if exists ( select * from dbo.sysobjects where id = object_id(N'[dbo].PM_DATA_VERSION') AND OBJECTPROPERTY(id, N'IsUserTable') = 1)
+begin
+	print 'Begin Performance Management Cleanup ' + CONVERT(char(20),getdate(),109);
+
+	declare
+	@Type varchar(50),
+	@Name varchar(50)
+
+	declare getPMObjects CURSOR FOR 
+	select 
+	case 
+	when OBJECTPROPERTY(id, N'IsUserTable') = 1 then 'TABLE' 
+	when OBJECTPROPERTY(id, N'IsView') = 1 then 'VIEW' 
+	when OBJECTPROPERTY(id, N'IsTableFunction') = 1 then 'FUNCTION' 
+	when OBJECTPROPERTY(id, N'IsScalarFunction') = 1 then 'FUNCTION' 
+	when OBJECTPROPERTY(id, N'IsTrigger') = 1 then 'TRIGGER' 
+	when OBJECTPROPERTY(id, N'IsProcedure') = 1 then 'PROCEDURE' 
+	end
+	, Name from dbo.sysobjects where Name <> 'PMSP_CLEANUP' and Name like 'PM%_%'
+	union 
+	select 'TABLE', Name from tempdb.dbo.sysobjects where Name like '##PMG_%'
+
+	begin
+		open getPMObjects
+		fetch next from getPMObjects into @Type, @Name
+		WHILE (@@fetch_status = 0)
+		begin
+			EXECUTE( 'DROP ' + @Type + ' ' + @Name)
+			print  'Dropped ' + @Type + ' ' + @Name;
+			fetch next from getPMObjects into @Type, @Name
+		end
+		close getPMObjects
+		deallocate getPMObjects
+	end
+
+	print 'End Performance Management Cleanup ' + CONVERT(char(20),getdate(),109);
+end
+
+-- Adding permission for Cert Accounts Import Or Cert Balances Import Or Rec Items Import
+if not exists (select * from FRONTIERPERMISSION where PERMISSIONID=4000033 AND METHODNAME='GetMultiple' AND BUSINESSOBJECTNAME='FOLDERWHITELIST')
+begin
+		insert into FrontierPermission (MethodName,BusinessObjectName,PermissionId,TableName,IdField,Param1Field,Param2Field,ActionDescription) values ('GetMultiple', 'FOLDERWHITELIST',4000033,NULL,NULL,NULL,NULL,'Get Import File Path');
+		print 'Added Import permission for Acct Certification ' + CONVERT(char(20),getdate(),109);
+end	
+
+IF EXISTS( SELECT * FROM SysConfigAttributes WHERE Attribute = 'Workflow Audience')
+BEGIN
+    DELETE SysConfigAttributes WHERE Attribute = 'Workflow Audience';
+    INSERT INTO SYSCONFIGATTRIBUTES VALUES (     -2,  'Workflow Audience',                                     NULL,       NULL,     NULL,        'TrintechWorkflow',                                           '01/01/1970',         'string',   'Parameter required to generate Token. Do not change the value.'   );
+END
+
+IF EXISTS( SELECT * FROM SysConfigAttributes WHERE Attribute = 'Workflow Issuer')
+BEGIN
+    DELETE SysConfigAttributes WHERE Attribute = 'Workflow Issuer';
+    INSERT INTO SYSCONFIGATTRIBUTES VALUES (     -2,  'Workflow Issuer',                                       NULL,       NULL,     NULL,        'Trintech',                                                   '01/01/1970',         'string',   'Parameter required to generate Token. Default: Trintech'   );
+END
+
+declare
+    @Version int
+begin
+    select @Version = Version from COMMONSCHEMAVERSION;
+    if (@Version <= 840)
+    begin
+		if not exists (select * from dbo.sysobjects where id = object_id(N'[dbo].[UserConfig]') and OBJECTPROPERTY(id, N'IsUserTable') = 1)
+		begin
+			print 'Creating table UserConfig'
+			CREATE TABLE UserConfig(
+				UserConfigId int NOT NULL IDENTITY(1,1) CONSTRAINT UserConfig_PK PRIMARY KEY CLUSTERED,
+				UserName    varchar(50)             NULL,
+				Section     varchar(255)            NOT NULL,
+				ProfileKey  varchar(255)            NOT NULL,
+				Entry       varchar(4000)           NULL,
+				IsDefault   int         DEFAULT (0) NOT NULL,
+				IsOverride  int         DEFAULT (1) NOT NULL,
+				Application varchar(50)             NULL
+			);
+
+			create unique index Def_Sect_Key_User_UserConfig on UserConfig (IsDefault, Section, ProfileKey, UserName);
+
+			print 'Created table UserConfig'
+		end
+    end
+end
+go
+
+GRANT REFERENCES, SELECT, INSERT, UPDATE, DELETE ON dbo.UserConfig TO SqlUsers
+GO
+
+-- **********************************
+-- Insert default UserConfig records
+-- **********************************
+
+delete from UserConfig where IsDefault = 1;
+insert into UserConfig(Section, ProfileKey, Entry, IsDefault, IsOverride) values ('AdminPreferences', 'SchedulerId', '1', 1, 0);
+go
+
+
+
+
+--- ***************************************************************************
+--- **                                                                       **
+--- ** Frontier_HostedEnvironment_DefaultData_SQL.sql                        **
+--- **                                                                       **
+--- ** This script provides database entries and updates to support the      **
+--- ** hosted environment,                                                   **
+--- **                                                                       **
+--- ** (c) 2016, Trintech. All Rights Reserved.                              **
+--- **                                                                       **
+--- ** NOTE:  [Tenant] must be replaced with specific tenant name            **
+--- **                                                                       **
+--- ***************************************************************************
+
+declare
+    @Count integer,
+    @ProcessName varchar(255);
+begin
+
+    -- Hosted environment sysconfig
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Hosted Environment';
+    if( @Count = 0 )
+    begin
+        insert into SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+        values (-2, 'Frontier Hosted Environment', NULL, NULL, NULL, '1', '01/01/1970', 'string', 'YES/NO - This is a hosted environment');
+    end
+    else
+    begin
+        update SysConfigAttributes set StringValue = '1' where Attribute = 'Frontier Hosted Environment';   
+    end
+
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Use Voltage Encryption';
+    if( @Count > 0 )
+    begin
+		Delete from Sysconfigattributes where Attribute = 'Frontier Use Voltage Encryption';
+    end
+
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Use AES Field Encryption';
+    if( @Count = 0 )
+    begin
+        insert into SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+        values (-2, 'Frontier Use AES Field Encryption', 1, NULL, NULL, NULL, '01/01/1970', 'short', 'YES/NO - Use AES encryption');
+    end
+    else
+    begin
+        update SysConfigAttributes set ShortValue = '1' where Attribute = 'Frontier Use AES Field Encryption';   
+    end
+
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Use AES Attachment Encryption';
+    if( @Count = 0 )
+    begin
+        insert into SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+        values (-2, 'Frontier Use AES Attachment Encryption', 0, NULL, NULL, NULL, '01/01/1970', 'short', 'YES/NO - Use AES encryption for attachments');
+    end
+    else
+    begin
+        update SysConfigAttributes set ShortValue = '0' where Attribute = 'Frontier Use AES Attachment Encryption';   
+    end
+	
+   -- P drive mapping sysconfig
+   -- NOTE: requires replacement of [Tenant] placeholder for each tenant 
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Hosted Environment Drive Path';
+    if( @Count = 0 )
+    begin
+        insert into SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+        values (-2, 'Frontier Hosted Environment Drive Path', NULL, NULL, NULL, 'P:\\usr2lfdssh-zz01.lower.trintech.host\Tenant Shares\{{Tenant}} Root Folder\{{Tenant}} User Share\Frontier', '01/01/1970', 'string', 'shared drive mapping');		
+    end
+
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Fiserv Voltage Protector Config Path';
+    if( @Count = 1 )
+    begin
+		Delete from SysConfigAttributes where Attribute = 'Fiserv Voltage Protector Config Path';
+    end
+
+	
+    -- PBI 948523:Auto Matching Wizard log file output path reverts to c: drive
+    update METADATA set DEFAULTFUNCTION = '=P:\Reports\matchlog.txt' where BUSINESSOBJECT = 'AUTOMATCHJOB' and ELEMENTNAME = 'FILEPATH';
+    
+    -- PBI 1202597:Report to file option dialog shows wrong default file path
+    -- Solution: Change Sysconfigs to show correct file path to P drive rather than UNC path
+    update SysConfigAttributes set StringValue = 'P:/Reports/' where Attribute like 'Frontier Report Output Path' or Attribute like 'Frontier Reconciliation Output Path' or Attribute like 'Frontier User Report File Output Path'; 
+    
+    -- PBI 1201916:DF - IW ONLY - File Path name for Reports, Save Grid to file, etc. defaulting to full UNC path
+    -- Solution: Change configuration so we stream the reports and the save grid to file file from Mid Teir
+    update SysConfigAttributes set StringValue = 'DIRECT' where Attribute like 'Frontier File Access Method';
+    
+    select @ProcessName = processName from SERVERSTARTUP;
+    delete from serverstartup where serverstartupid = 125;
+    --INSERT INTO SERVERSTARTUP VALUES (125 , 0 , @ProcessName ,'FILESERVICES' , NULL , 0 , 0 ,  0 ,0, NULL ,  NULL  );
+	
+	-- Delete the Frontier API option
+    select @Count = count(*) from MENUENTRY where MENUENTRYID = 10040;
+    if( @Count = 1 )
+    begin
+		Delete from MENUENTRY where MENUENTRYID = 10040;
+    end	
+
+end
+go

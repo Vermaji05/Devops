@@ -1,0 +1,178 @@
+param($user,$password,$workdir)
+
+$ScriptDirectory = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+try {
+    write-host "$ScriptDirectory\shared_functions.ps1"
+    . ("$ScriptDirectory\shared_functions.ps1")
+    
+}catch{
+    write-host "Import of shared_functions.ps1 failed!"
+}
+
+cd d:\jdk17.0.10_7\bin\
+
+#Check if password has been created for Frontier sql account and generate an encrypted one if it hasn't been
+$secretname = "${common.tenantname}-configinfo-frontierdbpwd"
+$secret = GetSecret $secretname
+
+if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+    #secret doesn't exist - check if default exists
+    $frontierDBPwd = $(GeneratePassword)
+    $frontierDBPwdEnc = ./java.exe FrontierEnc $frontierDBPwd
+    SetSecret "$secretname" "$frontierDBPwdEnc"
+    write-host "Secret $secretname added!"
+}elseif ($secret -eq -1){
+    write-host "Error in GetSecret"
+}else{
+    write-host "Secret found!"
+    $frontierDBPwdEnc =  $secret
+    $frontierDBPwd = ./java.exe FrontierEnc dec $frontierDBPwdEnc
+}
+
+$SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+$Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+
+if('${common.environment}' -eq 'Dev'){
+   $AdminBox = "USR2LFTADM-ZZ01"
+}else{
+   $AdminBox = "USR1CIMADM-ZZ01"
+}
+#$AdminBox = "USR1CIMADM-ZZ01"
+
+
+"${common.sqlserver}".split(",")  | foreach{
+    $server = "$($_.Trim()).$($env:userdnsdomain)"
+
+    if ($server -ne '' -and $server -ne $null -and $server -ne ".$env:userdnsdomain"){
+        Invoke-Command -ComputerName $server -Authentication CredSSP -Credential $Credentials -ArgumentList $frontierDBPwd,$AdminBox  -UseSSL -ScriptBlock {
+                param($frontierDBPwd,$AdminBox)
+                if (!$(Get-Module SqlServer)){
+                    Install-Module SqlServer -Force -AllowClobber
+                }
+                write-host "Do things on Server"
+                Write-Host $($env:computername)
+                $sqlServer = "."
+                #Write-Host "${frontier.dbuser} $frontierDBPwd"
+                $sqlDatabase = "${frontier.dbname}"
+                if("${frontier.workflow.enabled}" -eq "True"){
+                $baselineBak = "Frontier_baseline_2022_4_wfltable.bak"
+                }else{
+                $baselineBak = "Frontier_baseline_2022_4.bak"
+                }
+
+                $sqlCmd = "SELECT CASE WHEN DB_ID('$sqlDatabase') IS NULL THEN 'FALSE' ELSE 'TRUE' END AS Result;";
+                $exists = Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+                if($exists.Result -and $exists.Result -eq $true) {
+                    Write-Host "Database already exists"
+                    $sqlCmd = "USE master
+                                IF NOT EXISTS (SELECT name FROM master.sys.server_principals WHERE name = N'${frontier.dbuser}')
+                                BEGIN
+                                CREATE LOGIN ${frontier.dbuser} WITH PASSWORD = `'$frontierDBPwd`'
+                                END
+                                USE $sqlDatabase
+                                IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = N'${frontier.dbuser}')
+                                BEGIN
+                                CREATE USER ${frontier.dbuser}
+                                FOR LOGIN ${frontier.dbuser} 
+                                END
+                                IF (select IS_ROLEMEMBER('db_owner', '${frontier.dbuser}') AS is_member) = 0 OR (select IS_ROLEMEMBER('db_owner', '${frontier.dbuser}') AS is_member) = NULL
+                                BEGIN
+                                ALTER ROLE `"db_owner`" ADD MEMBER `"${frontier.dbuser}`"
+                                END
+                                IF (select IS_ROLEMEMBER('SqlUsers', '${frontier.dbuser}') AS is_member) = 0 OR (select IS_ROLEMEMBER('SqlUsers', '${frontier.dbuser}') AS is_member) = NULL
+                                BEGIN
+                                ALTER ROLE `"SqlUsers`" ADD MEMBER `"${frontier.dbuser}`"
+                                END"
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+                    Write-Host "##vso[task.setvariable variable=NewDB]False"
+                }else{
+                    Write-Host "Creating $sqlDatabase with login"
+                    $sqlCmd = "CREATE DATABASE $sqlDatabase;";
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+
+                    $sqlCmd = "Create LOGIN `"${frontier.dbuser}`" WITH PASSWORD = `'$frontierDBPwd`';";
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd;
+                }
+                $sqlCmd = "SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = N'SysUser'"
+                $tableStatus = Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd
+                if ($tableStatus) {
+                    $return = $true
+                } else {
+                    $return = $false
+                }
+                if($return -eq $false){
+                    if(!$(Test-Path 'E:\SQL_Backups\')){
+                        mkdir 'E:\SQL_Backups\'
+                    }
+                    Write-Host "Restoring baseline on frontier db"
+                    $possibleDataLocation = @("D:\SQL_Data\Encrypted","D:\SQL_Data\MSSQL16.MSSQLSERVER\MSSQL\DATA")
+                    $possibleLogLocation = @("D:\SQL_Log\Encrypted","D:\SQL_Log\MSSQL16.MSSQLSERVER\MSSQL\Data")
+                    $dataLocation = ''
+                    $logLocation = ''
+                    $possibleDataLocation | foreach {
+
+                        if ([System.IO.Directory]::Exists($_) -and $dataLocation -eq '')
+                        {
+                            $dataLocation = $_
+                        }
+                    }
+                    $possibleLogLocation | foreach {
+
+                        if ([System.IO.Directory]::Exists($_) -and $logLocation -eq '')
+                        {
+                            $logLocation = $_
+                        }
+                    }
+                    Copy-Item "\\$AdminBox\d$\BuildRepo\Frontier\Baseline\$baselineBak" -Destination "E:\SQL_Backups"
+                    $sqlCmd = "alter database [$sqlDatabase] set offline with rollback immediate;";
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd;
+                    $RelocateData = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sqlDatabase", "$dataLocation\$sqlDatabase.mdf")
+                    $RelocateLog = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sqlDatabase`_log", "$logLocation\$sqlDatabase`_log.ldf")
+                    Restore-SqlDatabase -ServerInstance $sqlServer -Database $sqlDatabase -BackupFile "E:\SQL_Backups\$baselineBak" -RelocateFile @($RelocateData,$RelocateLog) -ReplaceDatabase
+                    $sqlCmd = "alter database [$sqlDatabase] set online;";
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd;
+                    
+                    $sqlCmd = "select Name from sys.databases where state_desc='OFFLINE'"
+                    $dbStatus = (Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database master -Query $sqlCmd).Name
+                    if($dbStatus -eq $sqlDatabase){
+                        $sqlCmd = "ALTER DATABASE $sqlDatabase SET ONLINE"
+                        Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database master -Query $sqlCmd;
+                    }
+                    
+                    $sqlCmd = "ALTER DATABASE $sqlDatabase MODIFY FILE (NAME='INSTALL_Frontier30_Data', NEWNAME='$sqlDatabase');
+                    ALTER DATABASE $sqlDatabase MODIFY FILE (NAME='INSTALL_Frontier30_Log', NEWNAME='$sqlDatabase`_log');
+                    EXEC sp_changedbowner sa;
+                    CREATE USER `"${frontier.dbuser}`" FOR LOGIN `"${frontier.dbuser}`";
+                    ALTER ROLE `"db_owner`" ADD MEMBER `"${frontier.dbuser}`";
+                    ALTER ROLE `"SqlUsers`" ADD MEMBER `"${frontier.dbuser}`";"
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd;
+                    Write-Host "##vso[task.setvariable variable=NewDB]True"
+                }
+
+                if("${frontier.workflow.enabled}" -eq "True"){
+
+                $sqlDatabase = "${frontier.workflow.dbname}"
+                $sqlCmd = "SELECT CASE WHEN DB_ID('$sqlDatabase') IS NULL THEN 'FALSE' ELSE 'TRUE' END AS Result;";
+                $exists = Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+                if($exists.Result -and $exists.Result -eq $true) {
+                    Write-Host "Database $sqlDatabase already exists"
+                }else{
+                    Write-Host "Creating $sqlDatabase with login"
+                    $sqlCmd = "CREATE DATABASE $sqlDatabase;";
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+                    $sqlCmd = "ALTER DATABASE [$sqlDatabase] SET ALLOW_SNAPSHOT_ISOLATION ON;"
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+                    $sqlCmd = "ALTER DATABASE [$sqlDatabase] SET READ_COMMITTED_SNAPSHOT ON;"
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Query $sqlCmd;
+
+                    $sqlCmd = "CREATE USER `"${frontier.dbuser}`" FOR LOGIN `"${frontier.dbuser}`" ;";
+                    Write-Host $Sqlcmd
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd;
+                    $sqlCmd = "ALTER ROLE `"db_owner`" ADD MEMBER `"${frontier.dbuser}`";";
+                    Invoke-Sqlcmd -ServerInstance $sqlServer -TrustServerCertificate -Database $sqlDatabase -Query $sqlCmd;
+                }
+            }   
+            Remove-Item "E:\SQL_Backups\*.bak"
+        }
+    }
+}

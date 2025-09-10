@@ -1,0 +1,247 @@
+Param(
+    [Parameter(Mandatory=$true)]
+    [string[]]
+    $user,
+    [Parameter(Mandatory=$true)]
+    [string[]]
+    $password,
+    [Parameter(Mandatory=$false)]
+    [string]
+    $dfsserver
+)
+
+#add environment preset vars
+$domainshort = "${common.domain}"
+$dfsserver = "$dfsserver.$domainshort.trintech.host"
+$SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+$Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+
+Invoke-Command -ComputerName $dfsserver -Authentication Credssp -Credential $Credentials -UseSSL  -ScriptBlock {
+$tenant = "${common.tenantname}"
+if('${common.environment}' -eq 'Dev'){
+$tenantRootFolder = "D:\TenantShares\" + "$($tenant)"
+$tenantAdminFolder = $tenantRootFolder + "\" + "Admin"
+$tenantUserFolder = $tenantRootFolder + "\" + "User"
+}else{
+$tenantRootFolder = "D:\Shares\SFTP01" + "\$($tenant)"
+$tenantAdminFolder = $tenantRootFolder + "\" + "Admin"
+$tenantUserFolder = $tenantRootFolder + "\" + "User"
+}
+$Tenantproduct = "Frontier"
+
+#Setting folder permissions
+Write-Host "In $tenantRootFolder reset permissions to the defaults and apply to all child sub-folders"
+cmd /c icacls $tenantRootFolder /t /c
+cmd /c icacls $tenantRootFolder /T /Q /C /RESET
+
+write-host "In $tenantRootFolder for '$tenant User Group' - grant ReadAndExecute to This folder only, enable inheritance"
+$Acl = Get-Acl "$tenantRootFolder"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+$Acl.SetAccessRuleProtection($false, $true)
+Set-Acl "$tenantrootFolder" $Acl
+
+write-host "In $tenantRootFolder for '$tenant Service Group' - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantRootFolder"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Service Group", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantrootFolder" $Acl
+
+write-host "In $tenantRootFolder for '$tenant Admin Group' - grant FullControl to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantRootFolder"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Admin Group", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantrootFolder" $Acl
+
+write-host "In $tenantUserFolder for '$tenant User Group' - grant Modify to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct for '$tenant User Group' - grant Modify to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Client Import for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Client Import"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Client Import" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Client Import\Static for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Client Import\Static"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Client Import\Static" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Export Files for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Export Files"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Export Files" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Misc File for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Misc File"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Misc File" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for Administrators - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for Domain Admins - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\Domain Admins", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for Frontier Deploy - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\svc_frontierdeploy", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for '$tenant Service Group' - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Service Group", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for '$tenant Admin Group' - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Admin Group", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs for '$tenant Log Group' - grant Read to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Log Group", "Read", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Logs\RDP for '$tenant User Group' - grant Write to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs\RDP"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Write", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Logs\RDP" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for '$tenant User Group' - deny Delete to This folder, subfolders and files, remove inheritance"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "ContainerInherit,ObjectInherit", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+$Acl.SetAccessRuleProtection($true, $true)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for Administrators - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+Write-Host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for Domain Admins - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\Domain Admins", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for '$tenant Service Group' - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Service Group", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for '$tenant Admin Group' - grant Full control to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Admin Group", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for '$tenant Log Group' - grant Read to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant Log Group", "Read", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Processing Results\Recap for '$tenant User Group' - grant Read & Execute, Write to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.AddAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Processing Results\Recap" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Reports for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Reports"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Reports" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Reports\Frontier Custom Reports for '$tenant User Group' - grant Read & Execute to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Reports\Frontier Custom Reports"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Reports\Frontier Custom Reports" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Reports\Frontier Custom Reports for '$tenant User Group' - deny Delete to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Reports\Frontier Custom Reports"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "ContainerInherit,ObjectInherit", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Reports\Frontier Custom Reports" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Reports\TransferManager for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Reports\TransferManager"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Reports\TransferManager" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Reports\TransferManager\Log for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Reports\TransferManager\Log"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Reports\TransferManager\Log" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Shared Folder for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Shared Folder"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Shared Folder" $Acl
+
+write-host "In $tenantUserFolder\$tenantProduct\Shared Folder\Static for '$tenant User Group' - deny Delete to This folder only"
+$Acl = Get-Acl "$tenantUserFolder\$tenantProduct\Shared Folder\Static"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Delete", "None", "None", "Deny")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantUserFolder\$tenantProduct\Shared Folder\Static" $Acl
+
+write-host "In $tenantAdminFolder - hide this folder and subfolders"
+Get-Item "$tenantAdminFolder" -force | ForEach-Object { $_.Attributes = $_.Attributes -bor "Hidden" }
+#Get-ChildItem -recurse "$tenantAdminFolder" -force | ForEach-Object { $_.Attributes = $_.Attributes -bor "Hidden" }
+Get-Item "$tenantAdminFolder\$tenantProduct\Configurations" -force | ForEach-Object { $_.Attributes = $_.Attributes -bor "Hidden" }
+#Get-Item "$tenantAdminFolder\$tenantProduct\Configurations\Public" -force | ForEach-Object { $_.Attributes = $_.Attributes -bor "Hidden" }
+Get-Item "$tenantAdminFolder\$tenantProduct\Reports" -force | ForEach-Object { $_.Attributes = $_.Attributes -bor "Hidden" }
+
+write-host "In $tenantAdminFolder\$tenantProduct\Configurations\Public for '$tenant User Group' - grant Read to This folder, subfolders and files"
+$Acl = Get-Acl "$tenantAdminFolder\$tenantProduct\Configurations\Public"
+$Ar = New-Object System.Security.AccessControl.FileSystemAccessRule("$domainshort\$tenant User Group", "Read", "ContainerInherit,ObjectInherit", "None", "Allow")
+$Acl.SetAccessRule($Ar)
+Set-Acl "$tenantAdminFolder\$tenantProduct\Configurations\Public" $Acl
+}

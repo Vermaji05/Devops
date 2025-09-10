@@ -1,0 +1,200 @@
+$ScriptDirectory = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+try {
+    write-host "$ScriptDirectory\shared_functions.ps1"
+    . ("$ScriptDirectory\shared_functions.ps1")
+    
+}catch{
+    write-host "Import of shared_functions.ps1 failed!"
+}
+
+#add environment preset vars
+$environment = "${common.environment}"
+$tenant = "${common.tenantname}"
+$domainshort = "${common.domain}"
+$svcAccount = "svc_$tenant"
+$adBasePath = "OU=TTW$($environment)Tenants,OU=Frontier,OU=PCI,OU=Service_Catalog,DC=$domainshort,DC=trintech,DC=host"
+$adTenantPath = "OU=$tenant,$adbasePath"
+#$svcPassword = "$(GeneratePassword)"
+$customerdomain = $tenant + ".com"
+$servicegroup = "Frontier" + $environment + "_svc_Accounts"
+$envusergroup = "Frontier" + $environment + "TenantUsers"
+
+
+cd D:\jdk17.0.10_7\bin
+$secretname = "${common.tenantname}-configinfo-svcpwd"
+$secret = GetSecret $secretname
+
+if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+    #secret doesn't exist - check if default exists
+    $svcPassword = $(GeneratePassword)
+    $svcPasswordEnc = ./java.exe FrontierEnc $svcPassword
+    SetSecret "$secretname" "$svcPasswordEnc"
+    write-host "Secret $secretname added!"
+}elseif ($secret -eq -1){
+    write-host "Error in GetSecret"
+}else{
+    write-host "Secret found!"
+    $svcPasswordEnc =  $secret
+    $svcPassword = ./java.exe FrontierEnc dec $svcPasswordEnc
+}
+
+#Support User Default
+$supportUserName = 'trintech.support'
+$supportUPNName = "trintech.support@$($customerdomain)"
+$supportpw = 'TRDev4321#'
+$supportSecurePassword = convertto-securestring "$supportpw" -asplaintext -force
+$supportDisplay = "Trintech Support ($tenant)"
+$supportSAMAccountName = "ts#$tenant"
+if($supportSAMAccountName.Length -gt 20){
+    $newTenantName = $tenant.Replace("test","")
+    $supportSAMAccountName = "ts#" + $newTenantName.Substring(0,13) + "test"
+}else{
+    $supportSAMAccountName = "ts#$tenant"
+}
+$supportPath = "cn=$($tenant) Log Group,$($adTenantPath)"
+
+#Admin User Default
+$adminUserName = 'fron.admin'
+$adminUPNName = "fron.admin@$($customerdomain)"
+$adminpw = 'TRDev4321#'
+$adminSecurePassword = convertto-securestring "$adminpw" -asplaintext -force
+$adminDisplay = "Frontier Admin ($tenant)"
+$adminSAMAccountName = "fa#$tenant"
+if($adminSAMAccountName.Length -gt 20){
+    $newTenantName = $tenant.Replace("test","")
+    $adminSAMAccountName = "fa#" + $newTenantName.Substring(0,13) + "test"
+}else{
+    $adminSAMAccountName = "fa#$tenant"
+}
+$adminPath = "cn=$($tenant) Admin Group,$($adTenantPath)"
+
+if ($svcAccount.Length -gt 20)
+{
+    
+    $newSvcAccount = $svcAccount.Replace("test","")
+    $SamAccountName = $newSvcAccount.Substring(0,16) + "test"
+        
+}else{
+    $SamAccountName = $svcAccount
+}
+
+#Converting svc password to secure string
+$svcSecurePassword = convertto-securestring "$svcPassword" -asplaintext -force
+
+$description = "Frontier Service User ($tenant)"
+$displayName = "Frontier Service User ($tenant)"
+
+#Create OU and default groups
+if (!$(Get-ADOrganizationalUnit -Filter "Name -eq '$tenant'"))
+{
+    Write-Host "Creating $tenant OU"
+    New-ADOrganizationalUnit -Name $tenant -Path $adBasePath
+}
+
+if (!$(Get-ADUser -Filter "UserPrincipalName -eq '$svcAccount@$($env:userdnsdomain)'"))
+{
+    Write-Host "Creating Service Account $svcAccount@$($env:userdnsdomain)"
+    New-ADUser -Name $svcAccount -Description $description -SamAccountName $SamAccountName -UserPrincipalName "$svcAccount@$($env:userdnsdomain)" -DisplayName $displayName -Enabled $true -AccountPassword $svcSecurePassword -PasswordNeverExpires $true -CannotChangePassword $false -Path $adTenantPath
+}
+
+if (!$(Get-ADGroup -Filter "Name -eq '$tenant Admin Group'" -SearchBase $adTenantPath))
+{
+    New-ADGroup -Name "$tenant Admin Group" -DisplayName "$tenant Admin Group" -Description "Tenant administrative accounts for $tenant" -GroupScope Global -GroupCategory Security -Path $adTenantPath
+}
+
+if (!$(Get-ADGroup -Filter "Name -eq '$tenant Service Group'" -SearchBase $adTenantPath))
+{
+    New-ADGroup -Name "$tenant Service Group" -DisplayName "$tenant Service Group" -Description "Tenant service accounts for $tenant" -GroupScope Global -GroupCategory Security -Path $adTenantPath
+}
+
+if (!$(Get-ADGroup -Filter "Name -eq '$tenant User Group'" -SearchBase $adTenantPath))
+{
+    New-ADGroup -Name "$tenant User Group" -DisplayName "$tenant User Group" -Description "Tenant user accounts for $tenant" -GroupScope Global -GroupCategory Security -Path $adTenantPath
+}
+
+if (!$(Get-ADGroup -Filter "Name -eq '$tenant Log Group'" -SearchBase $adTenantPath))
+{
+    New-ADGroup -Name "$tenant Log Group" -DisplayName "$tenant Log Group" -Description "Tenant log accounts for $tenant" -GroupScope Global -GroupCategory Security -Path $adTenantPath
+}
+
+#Create default users
+if (!$(Get-ADUser -Filter "Name -eq '$supportUserName'" -SearchBase $adTenantPath))
+{
+    Write-Host "Creating default trintech.support Account $supportUserName"
+    New-ADUser -Name $supportUserName -Description "Tenant support account for $tenant" -SamAccountName $supportSAMAccountName -UserPrincipalName "$supportUPNName" -DisplayName "Trintech Support ($tenant)" -Enabled $true -AccountPassword $supportSecurePassword -PasswordNeverExpires $true -CannotChangePassword $false -Path $adTenantPath
+}
+
+if (!$(Get-ADUser -Filter "Name -eq '$adminUserName'" -SearchBase $adTenantPath))
+{
+    Write-Host "Creating default fron.admin Account $adminUserName"
+    New-ADUser -Name $adminUserName -Description "Tenant administrator account for $tenant" -SamAccountName $adminSAMAccountName -UserPrincipalName "$adminUPNName" -DisplayName "Frontier Admin ($tenant)" -Enabled $true -AccountPassword $adminSecurePassword -PasswordNeverExpires $true -CannotChangePassword $false -Path $adTenantPath
+}
+
+#add default users to default groups
+$members = Get-ADGroupMember -Identity "$tenant Service Group" -Recursive | Select-Object -ExpandProperty SamAccountName
+
+if ($members -contains $SamAccountName){
+write-host "$samaccountname is already a member of the service group"
+}else{
+Add-ADGroupMember -Identity $(Get-ADGroup -Filter "Name -eq '$tenant Service Group'") -Members $(Get-ADUser -Filter "UserPrincipalName -eq '$svcAccount@$($env:userdnsdomain)'")
+}
+
+$members = Get-ADGroupMember -Identity "$tenant Log Group" -Recursive | Select -ExpandProperty SamAccountName
+
+if ($members -contains $supportSAMAccountName){
+write-host "$supportSAMAccountName is already a member of the log group"
+}else{
+Add-ADGroupMember -Identity $(Get-ADGroup -Filter "Name -eq '$tenant Log Group'") -Members $(Get-ADUser -Filter "UserPrincipalName -eq '$($supportUPNName)'")
+}
+
+$members = Get-ADGroupMember -Identity "$tenant User Group" -Recursive | Select -ExpandProperty SamAccountName
+
+if ($members -contains $supportSAMAccountName){
+write-host "$supportSAMAccountName is already a member of the user group"
+}else{
+Add-ADGroupMember -Identity $(Get-ADGroup -Filter "Name -eq '$tenant User Group'") -Members $(Get-ADUser -Filter "UserPrincipalName -eq '$($supportUPNName)'")
+}
+
+$members = Get-ADGroupMember -Identity "$tenant Admin Group" -Recursive | Select -ExpandProperty SamAccountName
+
+if ($members -contains $adminSAMAccountName){
+write-host "$adminSAMAccountName is already a member of the $tenant Admin Group"
+}else{
+Add-ADGroupMember -Identity $(Get-ADGroup -Filter "Name -eq '$tenant Admin Group'") -Members $(Get-ADUser -Filter "UserPrincipalName -eq '$($adminUPNName)'")
+}
+
+#adding service group to environment specific svc group
+$members = Get-ADGroupMember -Identity $servicegroup | Select-Object -ExpandProperty SamAccountName
+if("$members" -contains "$tenant Service Group"){
+    write-host "'$tenant Service Group' is already a member of the $servicegroup group"
+}else{
+    Add-ADGroupMember -Identity $servicegroup -Members "$tenant Service Group"
+}
+
+#adding groups to environment specific user group
+$members = Get-ADGroupMember -Identity $envusergroup | Select-Object -ExpandProperty SamAccountName
+if("$members" -contains "$tenant Admin Group"){
+    write-host "'$tenant Admin Group' is already a member of the $envusergroup group"
+}else{
+    Add-ADGroupMember -Identity $envusergroup -Members "$tenant Admin Group"
+}
+if("$members" -contains "$tenant Log Group"){
+    write-host "'$tenant Log Group' is already a member of the $envusergroup group"
+}else{
+    Add-ADGroupMember -Identity $envusergroup -Members "$tenant Log Group"
+}
+if("$members" -contains "$tenant Service Group"){
+    write-host "'$tenant Service Group' is already a member of the $envusergroup group"
+}else{
+    Add-ADGroupMember -Identity $envusergroup -Members "$tenant Service Group"
+}
+if("$members" -contains "$tenant User Group"){
+    write-host "'$tenant User Group' is already a member of the $envusergroup group"
+}else{
+    Add-ADGroupMember -Identity $envusergroup -Members "$tenant User Group"
+}
+if("$members" -contains $supportSAMAccountName){
+    write-host "$supportSAMAccountName is already a member of the $envusergroup group"
+}else{
+    Add-ADGroupMember -Identity $envusergroup -Members $(Get-ADUser -Filter "UserPrincipalName -eq '$($supportUPNName)'")
+}

@@ -1,0 +1,78 @@
+param($user,$password,$appservers)
+$ScriptDirectory = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+try {
+    write-host "$ScriptDirectory\shared_functions.ps1"
+    . ("$ScriptDirectory\shared_functions.ps1")
+    
+}catch{
+    write-host "Import of shared_functions.ps1 failed!"
+}
+
+$SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+$Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+$webservers = "${frontier.web.servers}"
+$batservers = "${frontier.batch.servers}"
+$servers = $webservers + "," + $batservers + "," + $appservers
+"$servers".split(",")  | ForEach-Object{
+    $server = "$($_.Trim()).$($env:userdnsdomain)"
+if ($server -ne '' -and $server -ne $null -and $server -ne ".$env:userdnsdomain"){
+Invoke-Command -ComputerName $server -Authentication CredSSP -Credential $Credentials -UseSSL -ArgumentList $svcPassword -ScriptBlock {
+$tenant = "${common.tenantname}"
+$SQLServer = "${common.sqlserver}.${common.hostdomain}"
+
+Write-Host "Creating ODBC DSN for $tenant on $($env:computername) box"
+
+function CreateODBCConnectionSQL($server,$database)
+{
+$regFile = @"
+Windows Registry Editor Version 5.00 
+[HKEY_LOCAL_MACHINE\SOFTWARE\ODBC\ODBC.INI\ODBC Data Sources] 
+"$database"="ODBC Driver 17 for SQL Server" 
+[HKEY_LOCAL_MACHINE\SOFTWARE\ODBC\ODBC.INI\$database] 
+"Driver"="C:\\Windows\\system32\\msodbcsql17.dll"
+"Server"="$server"
+"ClientCertificate"=""
+"KeystoreAuthentication"=""
+"KeystorePrincipalId"=""
+"KeystoreSecret"=""
+"KeystoreLocation"=""
+"Trusted_Connection"="No"
+"Database"="$database"
+"Encrypt"="No"
+"TrustServerCertificate"="No"
+"QuotedId"="No"
+"AnsiNPW"="No"
+"TransparentNetworkIPResolution"="Disabled"
+"@
+
+$regFile | out-file $env:temp\a.reg; 
+$regimport =  Start-Process reg -ArgumentList "import $env:temp\a.reg" -PassThru -Wait
+    if ($regimport.ExitCode -eq 0)
+    {
+        Write-Host "Succesffully imported ODBC for $database"
+    }
+
+rm $env:temp\a.reg -Force
+}
+
+if(!(Test-Path "HKLM:\SOFTWARE\ODBC\ODBC.INI\${frontier.dbname}")){
+Write-Host "Creating ODBC for $sqlServer ${frontier.dbname}"
+CreateODBCConnectionSQL "$sqlServer" "${frontier.dbname}"
+}
+
+# Adding svc group to the local admin group
+$ADGroup = "Frontier" + "${common.environment}" + "_svc_Accounts"
+$LocalGroup = "Administrators"
+$group = [ADSI]"WinNT://./$LocalGroup,group"
+$members = @($group.psbase.Invoke("Members")) | ForEach-Object { $_.GetType().InvokeMember("Name", 'GetProperty', $null, $_, $null) }
+
+if ($members -contains $ADGroup) {
+    Write-Output "$ADGroup is already a member of the $LocalGroup group."
+} else {
+    $group.Add("WinNT://$ADGroup,group")
+    Write-Output "$ADGroup has been added to the $LocalGroup group."
+}
+
+}
+}
+}

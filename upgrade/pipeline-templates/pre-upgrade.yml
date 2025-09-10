@@ -1,0 +1,59 @@
+parameters:
+  - name: PoolName
+    type: string
+  - name: InputEnvironment
+    type: string
+  - name: PODId
+    type: string
+jobs:
+  - job: all
+    pool: ${{ parameters.PoolName }}
+    variables:
+      - group: ${{ variables.keyVaultParameters }}
+      - name: KV
+        value: ${{ variables.KeyVault }}
+    steps:
+      - powershell: |
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ variables.springConfigServerUrl }} --Name frontier --Env templates  --Label main --Username user  --Password password  --VaultName ${{ variables.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+        displayName: Read variables from ${{variables.springConfigServerUrl}} 
+      - task: PowerShell@2
+        displayName: 'Stopping all services on ${{ parameters.PODId }}'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Stop-Service.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''
+      - task: PowerShell@2
+        displayName: 'Creating database backup and snapshot'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/DBBackup.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''
+      - task: PowerShell@2
+        displayName: 'Creating tomcat backup for each tenant'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Tomcat-Backup.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''
+      - task: PowerShell@2
+        displayName: 'Creating backup of config files on shared location'
+        inputs:
+          targetType: inline
+          script: |
+            $fileserver = '${{ variables.fileserver }}'
+            $tenants = '$(tenants)'
+            $date = Get-Date -Format "yyyyMMdd"
+            foreach($tenant in $tenants){
+            if('${{ parameters.PoolName }}' -eq 'USR2_Frontier_Lower'){
+            $configLocation = '\\$fileserver\Tenant Shares\$tenant Root Folder\$tenant Admin Share\Frontier\Configurations'
+            $backupLocation = '\\$fileserver\Tenant Shares\$tenant Root Folder\$tenant Admin Share\Frontier\Configurations-$date'
+            }else{
+            $configLocation = '\\$fileserver\ttw$\$tenant\admin\frontier\Configurations'
+            $backupLocation = '\\$fileserver\ttw$\$tenant\admin\frontier\Configurations-$date'
+            }
+            Write-Host 'Taking config files backup for $tenant, Location: $backupLocation'
+            if(!(Test-Path $backupLocation)){
+            Copy-Item -Path $configLocation -Destination $backupLocation -Force
+            }else{
+            Write-Host 'Backup already exists!'
+            }
+            }
