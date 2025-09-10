@@ -1,0 +1,285 @@
+name: "$(Build.DefinitionName)-${{ parameters.InputCustomerName }}-${{ parameters.InputEnvironment }}-$(Date:yyyyMMdd)-"
+trigger: none
+parameters:
+  - name: PoolName
+    type: string
+    default: "USR2_Frontier_Lower"
+    displayName: Release agent pool
+    values:
+      - USR2_Frontier_Lower
+      - USR1_Frontier_Cloud
+      - USR2_Frontier_Cloud
+      - AUA2_Frontier_Cloud
+      - DEA2_Frontier_Cloud
+      - UKR2_Frontier_Cloud
+  - name: InputCustomerName
+    type: string
+    default: "customer"
+    displayName: Customer Name (20 Characters Max)
+  - name: InputEnvironment
+    type: string
+    default: "Dev"
+    values:
+      - Test
+      - Prod
+      - Dev
+  - name: PODId
+    type: string
+    values:
+      - "01"
+      - "02"
+      - "03"
+      - "04"
+      - "05"
+      - "06"
+      - "07"
+      - "08"
+      - "09"
+      - "10"
+      - "11"
+      - "12"
+      - "13"
+      - "18"
+  - name: WFEnable
+    type: boolean
+    displayName: Is this tenant WorkFlow enabled?
+  - name: isSSO
+    type: boolean
+    displayName: Is this tenant SSO enabled?
+  - name: CustomerDomain
+    type: string
+    default: "tenant1.com,tenant2.com"
+    displayName: Customer Domains (Comma separated)
+  - name: LicenseCount
+    type: number
+    default: 99
+    displayName: Please enter number of license required
+  - name: KeyVault
+    type: string
+    default: "CICD-Secrets"
+    displayName: Key vault
+    values:
+      - CICD-Secrets
+      - TrintechITKeyVault
+  - name: keyVaultParameters
+    type: string
+    default: "Cloud-KeyvaultParameters"
+    displayName: Key vault Parameters
+    values:
+      - Cloud-KeyvaultParameters
+      - Lower-KeyvaultParameters
+  - name: configBranch
+    type: string
+    default: "main"
+    displayName: Spring Config Branch
+    values: 
+      - main
+      - test_config
+
+variables:     
+  - name: springConfigServerUrl
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'http://10.72.73.33:8888'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'http://10.71.73.48:8888'   
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'http://10.72.169.36:8888'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'http://10.72.169.36:8888'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'http://10.72.169.36:8888'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'http://10.72.169.36:8888'
+  - name: buildRepo
+    value: "d:/apps/buildrepo"
+  - name: git
+    value: '$(Agent.HomeDirectory)\externals\git\cmd\git.exe'
+  - name: region
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR2'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'AUA2'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'DEA2'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'UKR2'
+  - name: envprefix
+    ${{ if eq(parameters.InputEnvironment, 'Dev') }}:
+      value: 'LF'
+    ${{ if eq(parameters.InputEnvironment, 'Prod') }}:
+      value: 'CF'
+    ${{ if eq(parameters.InputEnvironment, 'Test') }}:
+      value: 'CF'
+  - name: cmdbserver
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2LFSSQM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR2CFSSQF-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1CFSSQF-ZZ01'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'AUA2CFSSQM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'DEA2CFSSQM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'UKR2CFSSQM-ZZ01'
+  - name: fileserver
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2LFDSSH-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR2CFTDFS-ZZ00'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1CFTDFS-ZZ00'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'AUA1CTTDFS-ZZ00'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'DEA1CTTDFS-ZZ00'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'UKR2CFTDFS-ZZ00'
+  - name: dfsserver
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2LFDSSH-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR2CFTDFS-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1CFTDFS-ZZ01'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'AUA2CFTDFS-ZZ01'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'DEA2CFTDFS-ZZ01'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'UKR2CFTDFS-ZZ01'
+  - name: portaldbserver
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2LFSSQM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR2CFSSQF-ZZ02'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1CFSSQF-ZZ02'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'AUA2CFSSQM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'DEA2CFSSQM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'UKR2CFSSQM-ZZ01'
+  - name: adminserver
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2LFTADM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR1CIMADM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1CIMADM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'AUA2_Frontier_Cloud') }}:
+      value: 'AUA2CFTADM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'DEA2_Frontier_Cloud') }}:
+      value: 'DEA2CFTADM-ZZ01'
+    ${{ if eq(parameters.PoolName, 'UKR2_Frontier_Cloud') }}:
+      value: 'UKR2CFTADM-ZZ01'
+  - name: workspacedb
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+      value: "TrintechDatabaseDev"
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "TrintechWorkspace"
+    ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+      value: "TrintechWorkspace"
+    ${{ if and(eq(parameters.PoolName, 'AUA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "TrintechWorkspaceAUA2"
+    ${{ if and(eq(parameters.PoolName, 'DEA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "TrintechWorkspaceDEA2"
+    ${{ if and(eq(parameters.PoolName, 'UKR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "TrintechWorkspaceUKR2"
+  - name: appservers
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+      value: "usr2lftapp-0101,usr2lftapp-0201"
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "usr2cftapp-0101,usr2cftapp-0201"
+    ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+      value: "usr1cftapp-zz01,usr1cftapp-zz02,usr1cftapp-zz03,usr1cftapp-zz04,usr1cftapp-zz05"
+    ${{ if and(eq(parameters.PoolName, 'AUA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "aua2cftapp-zz01,aua2cftapp-zz02"
+    ${{ if and(eq(parameters.PoolName, 'DEA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "dea2cftapp-zz01,dea2cftapp-zz02"
+    ${{ if and(eq(parameters.PoolName, 'UKR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "ukr2cftapp-zz01,ukr2cftapp-zz02"
+  - name: sftphost
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+      value: "USR2LMDSSH-F001"
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "USR2CMDSSH-F001"
+    ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+      value: "USR1CFDSSH-F001"
+    ${{ if and(eq(parameters.PoolName, 'AUA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "aua1cmdftp-zz01"
+    ${{ if and(eq(parameters.PoolName, 'DEA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "dea1cmdftp-zz01"
+    ${{ if and(eq(parameters.PoolName, 'UKR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "ukr2cmdftp-zz01"
+  - name: lb1
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+      value: "usr2lmdltm-f001"
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "usr2cmdltm-f001"
+    ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+      value: "usr1cmdltm-f001"
+    ${{ if and(eq(parameters.PoolName, 'AUA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "aua2fwlltm-zz01"
+    ${{ if and(eq(parameters.PoolName, 'DEA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "dea2fwlltm-zz01"
+    ${{ if and(eq(parameters.PoolName, 'UKR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: "ukr2cmdltm-zz01"
+  - name: lb2
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+      value: ""
+    ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: ""
+    ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+      value: "usr1cmdltm-f002"
+    ${{ if and(eq(parameters.PoolName, 'AUA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: ""
+    ${{ if and(eq(parameters.PoolName, 'DEA2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: ""
+    ${{ if and(eq(parameters.PoolName, 'UKR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+      value: ""
+  - name: SMTPPort
+    ${{ if eq(parameters.InputEnvironment, 'Prod') }}:
+      value: '25'
+    ${{ if eq(parameters.InputEnvironment, 'Test') }}:
+      value: '1234'
+    ${{ if eq(parameters.InputEnvironment, 'Dev') }}:
+      value: '1234'
+
+resources: 
+  repositories:
+  - repository: SiteSetup
+    type: git
+    name: Frontier\SiteSetup
+    ref: refs/heads/main
+
+stages:
+  - stage: ImportExistingDetails
+    displayName: Import Existing Details into CMDB and SprinfConfig
+    jobs:
+      - template: CMDBUpdate.yml@SiteSetup
+        parameters:
+          allvariables: ${{ variables }}
+          allparameters: ${{ parameters }}
+  
+  - stage: CreateNewConfigs
+    displayName: Updating spring configs
+    jobs:
+      - template: springConfigUpdate.yml@SiteSetup
+        parameters:
+          allvariables: ${{ variables }}
+          allparameters: ${{ parameters }}
+
+  - stage: NewInstall
+    displayName: New Install
+    jobs:
+      - template: ./newInstall.yml
+        parameters:
+          allvariables: ${{ variables }}
+          allparameters: ${{ parameters }}

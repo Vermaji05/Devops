@@ -1,0 +1,387 @@
+parameters:
+  - name: allvariables
+    type: object
+  - name: allparameters
+    type: object
+    
+jobs:
+  - job: all
+    pool: ${{ parameters.allparameters.PoolName }}
+    variables:
+      - group: ${{ parameters.allparameters.keyVaultParameters }}
+      - name: KV
+        value: ${{ parameters.allparameters.KeyVault }}
+    steps:
+      - powershell: |
+            $Value = Invoke-RestMethod '${{ parameters.allvariables.springConfigServerUrl }}/${{ parameters.allparameters.configBranch }}/frontier-${{ parameters.allparameters.InputCustomerName }}.properties'
+            $Lines = $Value.ToString().Split([Environment]::NewLine);
+
+            for ($Index = 0; $Index -lt $Lines.Count; ++$Index) {
+                $Line = $Lines[$Index];
+                $Delimiter = $Line.IndexOf(':');
+                $Key = $Line.Substring(0, $Delimiter).Trim();
+                $Value = $Line.Substring($Delimiter + 1).Trim();
+                Write-Host "##vso[task.setvariable variable=$Key]$Value"
+            }
+            d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ parameters.allvariables.springConfigServerUrl }} --Name frontier --Env ${{ parameters.allparameters.InputCustomerName }}  --Label ${{ parameters.allparameters.configBranch }} --Username user  --Password password  --VaultName ${{ parameters.allparameters.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+        displayName: Read variables from ${{parameters.allvariables.springConfigServerUrl}} 
+      # - task: PowerShell@2
+      #   displayName: 'Create Tenant Folder Structure and Copy Template Files Down'
+      #   inputs:
+      #     targetType: inline
+      #     script: |
+      #       $user = "$(Admin.Username)"
+      #       $password = "$(ADMIN.PASSWORD)"
+      #       if('$(common.environment)' -eq 'Dev'){
+      #       $tenantRootSharePath = "\\${{parameters.allvariables.dfsserver}}\d$\TenantShares\$(common.tenantname)"
+      #       $tenantAdminSharePath = $tenantRootSharePath + "\Admin"
+      #       $tenantUserSharePath = $tenantRootSharePath + "\User"
+      #       }else{
+      #       $tenantRootSharePath = "\\${{parameters.allvariables.dfsserver}}\d$\Shares\SFTP01\$(common.tenantname)"
+      #       $tenantAdminSharePath = $tenantRootSharePath + "\Admin"
+      #       $tenantUserSharePath = $tenantRootSharePath + "\User"
+      #       }
+      #       $templatePath = "\\${{parameters.allvariables.adminserver}}\d$\Frontier\Util\$(common.environment)\util\frontier\2024_2\tenant create tools\templateTenantTokenized"
+      #       $iniTemplatePath = "\\${{parameters.allvariables.adminserver}}\d$\Frontier\Frontier Custom Reports Repository\_INI Files"
+      #       $DFSRootServer = "$(common.fileserver).$(common.hostdomain)"
+      #       $SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+      #       $Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+      #       if (!(test-path "$($tenantRootSharePath)")) {
+      #           New-Item -Path "$($tenantRootSharePath)" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Client Import" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Client Import\Static" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Export Files" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Misc File" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Processing Results" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Processing Results\Logs" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Processing Results\Logs\RDP" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Processing Results\Logs\Scheduler" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Processing Results\Logs\WebAccess" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Processing Results\Recap" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Reports" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Reports\Frontier Custom Reports" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Reports\TransferManager" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Reports\TransferManager\Log" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Shared Folder" -ItemType Directory
+      #           New-Item -Path "$($tenantUserSharePath)\Frontier\Shared Folder\Static" -ItemType Directory
+      #       }
+      #       if (!(test-path "$($tenantAdminSharePath)")) {
+      #           New-Item -Path "$($tenantAdminSharePath)\Frontier\Configurations" -ItemType Directory
+      #           New-Item -Path "$($tenantAdminSharePath)\Frontier\Configurations\Public" -ItemType Directory
+      #           New-Item -Path "$($tenantAdminSharePath)\Frontier\Reports" -ItemType Directory
+      #       }
+      #       if('$(common.environment)' -ne 'Dev'){
+      #       Invoke-Command -ComputerName $DFSRootServer -Authentication Credssp -Credential $Credentials -UseSSL -ScriptBlock {
+      #           D:\scripts\DFSMounts_TTW.ps1 /addfolders
+      #           D:\scripts\hide_folders.ps1
+      #       }
+      #       }
+      #       Write-Host "Copying template files to the tenant..."
+      #       Copy-Item "$templatePath\admin\Configurations\*.*" "$(common.adminshare)\frontier\Configurations\"
+      #       Copy-Item "$templatePath\admin\Configurations\public\*.*" "$(common.adminshare)\frontier\Configurations\public\"
+      #       Copy-Item "$templatePath\user\Processing Results\Recap\schema.ini" "$(common.usershare)\frontier\Processing Results\Recap\"
+      #       Copy-Item "$templatePath\CopyToTomcatConf\*.*" "$(common.adminshare)\frontier\Configurations\"
+      #       Copy-Item "$iniTemplatePath\CertReports.ini" "$(common.adminshare)\frontier\Configurations\public\"
+      #       Copy-Item "$iniTemplatePath\Reconrpt.ini" "$(common.adminshare)\frontier\Configurations\public\"
+      #       Copy-Item "$iniTemplatePath\TradeRpt.ini" "$(common.adminshare)\frontier\Configurations\public\"
+
+
+      #       #Write-Host "Copying SQL files over to be de-tokenized"
+      #       #cp ${{ parameters.allvariables.buildRepo }}/SQL "$(System.DefaultWorkingDirectory)\" -Recurse
+
+      - task: PowerShell@2
+        displayName: 'Create Secrets and run Create Tenant Folder Structure.bat'
+        inputs:
+          targetType: inline
+          script: | 
+            $ScriptDirectory = "$(System.DefaultWorkingDirectory)\powershell"
+            try {
+                write-host "$ScriptDirectory\shared_functions.ps1"
+                . ("$ScriptDirectory\shared_functions.ps1")
+
+            }catch{
+                write-host "Import of shared_functions.ps1 failed!"
+            }    
+            cd d:\jdk17.0.10_7\bin\
+            Write-Host "Checking and creating frontier database password"
+            $secretname = "$(common.tenantname)-configinfo-frontierdbpwd"
+            $secret = GetSecret $secretname
+            if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+                #secret doesn't exist - check if default exists
+                $frontierDBPwd = $(GeneratePassword)
+                $frontierDBPwdEnc = ./java.exe FrontierEnc $frontierDBPwd
+                SetSecret "$secretname" "$frontierDBPwdEnc"
+                write-host "Secret $secretname added!"
+            }elseif ($secret -eq -1){
+                write-host "Error in GetSecret"
+            }else{
+                write-host "Secret found!"
+                $frontierDBPwdEnc =  $secret
+                $frontierDBPwd = ./java.exe FrontierEnc dec $frontierDBPwdEnc
+            }
+
+            Write-Host "Checking and Creating service account password"
+            $secretname = "$(common.tenantname)-configinfo-svcpwd"
+            $secret = GetSecret $secretname
+            if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+                #secret doesn't exist - check if default exists
+                $svcPassword = $(GeneratePassword)
+                $svcPasswordEnc = ./java.exe FrontierEnc $svcPassword
+                SetSecret "$secretname" "$svcPasswordEnc"
+                write-host "Secret $secretname added!"
+            }elseif ($secret -eq -1){
+                write-host "Error in GetSecret"
+            }else{
+                write-host "Secret found!"
+                $svcPasswordEnc =  $secret
+                $svcPassword = ./java.exe FrontierEnc dec $svcPasswordEnc
+            }
+
+            Write-Host "Checking and creating API database connection string"
+            $secretname = "$(common.tenantname)-configinfo-apidbconnection"
+            $secret = GetSecret $secretname
+            if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+                #secret doesn't exist - check if default exists
+                $apiDBconnection = "Server=$(common.sqlserver).$(common.domain).trintech.host;Database=$(frontier.dbname);User Id=$(frontier.dbuser);Password=$frontierDBPwd;MultipleActiveResultSets=True;"
+                $apiDBconnectionENC = ./java.exe FrontierEnc $apiDBconnection
+                SetSecret "$secretname" "$apiDBconnectionENC"
+                write-host "Secret $secretname added!"
+            }elseif ($secret -eq -1){
+                write-host "Error in GetSecret"
+            }else{
+                write-host "Secret found!"
+                $apiDBconnectionENC =  $secret
+            }
+            $user = "$(Admin.Username)"
+            $password = "$(ADMIN.PASSWORD)"
+            $templatePath = "\\${{parameters.allvariables.adminserver}}\d$\Frontier\Util\$(common.environment)\util\frontier\2024_2\tenant create tools\templateTenantTokenized"
+            $iniTemplatePath = "\\${{parameters.allvariables.adminserver}}\d$\Frontier\Frontier Custom Reports Repository\_INI Files"
+            $DFSRootServer = "$(common.fileserver).$(common.hostdomain)"
+            $SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+            $Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+            Write-Host "Creating AD User Groups and Tenant Folder Structure"
+            cmd /c "$(System.DefaultWorkingDirectory)\powershell\Create Tenant Folder Structure.bat" $(common.tenantname) $(common.environment) y y y '$svcPassword' $(dfsserver).$(common.hostdomain)
+
+            Write-Host "Copying template files to the tenant..."
+            Copy-Item "$templatePath\admin\Configurations\*.*" "$(common.adminshare)\frontier\Configurations\"
+            Copy-Item "$templatePath\admin\Configurations\public\*.*" "$(common.adminshare)\frontier\Configurations\public\"
+            Copy-Item "$templatePath\user\Processing Results\Recap\schema.ini" "$(common.usershare)\frontier\Processing Results\Recap\"
+            Copy-Item "$templatePath\CopyToTomcatConf\*.*" "$(common.adminshare)\frontier\Configurations\"
+            Copy-Item "$iniTemplatePath\CertReports.ini" "$(common.adminshare)\frontier\Configurations\public\"
+            Copy-Item "$iniTemplatePath\Reconrpt.ini" "$(common.adminshare)\frontier\Configurations\public\"
+            Copy-Item "$iniTemplatePath\TradeRpt.ini" "$(common.adminshare)\frontier\Configurations\public\"
+
+            if('$(common.environment)' -ne 'Dev'){
+            Invoke-Command -ComputerName $DFSRootServer -Authentication Credssp -Credential $Credentials -UseSSL -ScriptBlock {
+                D:\scripts\DFSMounts_TTW.ps1 /addfolders
+                D:\scripts\hide_folders.ps1
+            }
+            }
+      ### Tokenize configuration files
+      - script: |
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ parameters.allvariables.springConfigServerUrl }} --Name frontier --Env ${{ parameters.allparameters.InputCustomerName }}  --Label ${{ parameters.allparameters.configBranch }} --Username user  --Password password  --VaultName ${{ parameters.allparameters.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+          IF '${{ parameters.allparameters.InputEnvironment }}'=='Dev' (
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  "\\${{ parameters.allvariables.fileserver }}\Tenant Shares\${{ parameters.allparameters.InputCustomerName }}" --Uri ${{ parameters.allvariables.springConfigServerUrl }} --Name frontier --Env ${{ parameters.allparameters.InputCustomerName }}  --Label ${{ parameters.allparameters.configBranch }} --Username user  --Password password  --VaultName ${{ parameters.allparameters.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+          ) ELSE (
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  "\\${{ parameters.allvariables.fileserver }}\TTW$\${{ parameters.allparameters.InputCustomerName }}" --Uri ${{ parameters.allvariables.springConfigServerUrl }} --Name frontier --Env ${{ parameters.allparameters.InputCustomerName }}  --Label ${{ parameters.allparameters.configBranch }} --Username user  --Password password  --VaultName ${{ parameters.allparameters.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+          )
+        displayName: 'Apply Configuration Files to Remote servers'
+
+      - task: PowerShell@2
+        displayName: 'Updating config file encoding'
+        inputs:
+          targetType: inline
+          script: |
+            Set-Location '$(common.configurations)'
+            Remove-Item *.tokenized 
+            Set-Location '$(common.configurations)\public'
+            Remove-Item *.tokenized 
+            function ConvertEncodingUTF8($path){
+            $content = Get-Content -Raw $path
+            $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+            [System.IO.File]::WriteAllLines($path, $content, $Utf8NoBomEncoding)
+            }
+            $configFiles = Get-ChildItem -Path "$(common.configurations)" -Recurse -Include *.xml,*.json,*.properties
+            Foreach($file in $configFiles){
+            ConvertEncodingUTF8 $file.Fullname
+            }
+
+      - task: PowerShell@2
+        displayName: 'Creating FrontierConfig.xml.bin from fe'
+        inputs:
+          targetType: inline
+          script: |
+            Write-Host "Creating FrontierConfig.xml.bin from fe"
+            Set-Location "$(common.configurations)"
+            ./fe -in "$(common.configurations)/frontierConfig.xml" -out "$(common.configurations)/public/FrontierConfig.xml.bin"
+
+      # - task: PowerShell@2
+      #   displayName: 'Create AD Components'
+      #   inputs:
+      #     targetType: filePath
+      #     filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-01-CreateADUsersAndGroups.ps1
+
+      # - task: PowerShell@2
+      #   displayName: 'Setting Tenant Folder Permission'
+      #   inputs:
+      #     targetType: filePath
+      #     filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-02-CreateTenantFolderPermissions.ps1
+      #     arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -dfsserver ${{ parameters.allvariables.dfsserver }}'
+
+      - task: PowerShell@2
+        displayName: 'Creating SFTP User and Folder'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-03-SFTPCreation.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -dfsserver ${{ parameters.allvariables.dfsserver }} -SFTPServer ${{ parameters.allvariables.sftphost }}'
+
+      - task: PowerShell@2
+        displayName: 'Setup SQL Users and Database'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-04-SQLSetup.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -workdir $(System.DefaultWorkingDirectory)'
+
+      - task: PowerShell@2
+        displayName: 'Running DB Prepare Script'
+        inputs:
+          targetType: inline
+          script: |
+            $user = "$(Admin.Username)"
+            $password = "$(Admin.Password)"
+            $SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+            $Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+            Invoke-Sqlcmd -ServerInstance $(common.sqlserver) -TrustServerCertificate -Database '$(frontier.dbname)' -InputFile $(System.DefaultWorkingDirectory)/SQL/Frontier-SQL-DBPrep.sql -Verbose
+            $session = New-PSSession -ComputerName $(common.sqlserver).$env:userdnsdomain -Credential $Credentials -UseSSL
+            $tenant = "$(common.tenantname)"
+            Invoke-Command -Session $session -ScriptBlock {
+                if(!(Test-Path "E:\sql_backups\$using:tenant")){
+                    New-Item -Path "E:\sql_backups\$using:tenant" -ItemType Directory
+                }
+            }
+            Copy-Item -Path '$(System.DefaultWorkingDirectory)/SQL/Frontier-SQL-DBPrep.sql' -Destination "E:\sql_backups\$tenant\Frontier-SQL-DBPrep.sql" -ToSession $session
+            Remove-PSSession -Session $session
+
+      - task: PowerShell@2
+        displayName: 'Running DB Upgrade Script'
+        inputs:
+          targetType: inline
+          script: |
+            Invoke-Sqlcmd -ServerInstance $(common.sqlserver) -TrustServerCertificate -Database '$(frontier.dbname)' -InputFile $(System.DefaultWorkingDirectory)/SQL/Frontier-SQL-DBUpgrade20242.sql -Verbose
+          
+      - task: PowerShell@2
+        displayName: 'Create tenant on Portal Database'
+        #condition: eq(variables['NewDB'], 'True')
+        inputs:
+          targetType: inline
+          script: |
+            Invoke-Sqlcmd -ServerInstance ${{parameters.allvariables.portaldbserver}} -TrustServerCertificate -Database ${{parameters.allvariables.workspacedb}} -InputFile $(System.DefaultWorkingDirectory)/SQL/Frontier-SQL-PortalTenantCreate.sql -Variable PodId=${{parameters.allparameters.PODId}} -Verbose
+
+      - task: PowerShell@2
+        displayName: 'Running SQL scripts for Workflow'
+        condition: eq(variables['frontier.workflow.enabled'], 'True')
+        inputs:
+          targetType: inline
+          script: |
+            $location = '\\${{parameters.allvariables.adminserver}}\d$\Frontier\Workflow\Frontier_2024.1_Workflow\1_Workflow\'
+            $serverName = '$(common.sqlserver)'
+            $databaseName = '$(frontier.dbname)'
+            $scripts = Get-ChildItem -Path $location -Filter "*.sql" | Where-Object { $_.Name -match "^[0-5]" }
+            foreach ($script in $scripts) {
+            Write-Host "Executing script: $($script.FullName)"
+            try {
+            Invoke-Sqlcmd -ServerInstance $serverName -TrustServerCertificate -Database $databaseName -InputFile $script.FullName -Verbose
+            Write-Host "Successfully executed: $($script.FullName)"
+            }
+            catch {
+            Write-Host "Error executing script: $($script.FullName)"
+            Write-Host $_.Exception.Message 
+            break
+            }
+            }
+
+      - task: PowerShell@2
+        displayName: 'Create SSOConfig.cfu file'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-05-CreateSSOConfigFile.ps1
+          arguments: '-adminbox ${{parameters.allvariables.adminserver}}'
+      
+      - task: PowerShell@2
+        displayName: 'Create ODBC DSN'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-06-CreateODBCConnection.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -appservers ''${{parameters.allvariables.appservers}}'''
+
+      - task: PowerShell@2
+        displayName: 'Configure tomcat on Web Box'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-07-TomcatConfiguration.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -adminbox ${{parameters.allvariables.adminserver}}'
+
+      - task: PowerShell@2
+        displayName: 'Installing Frontier Services On Web Servers'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-08-ServiceInstallationOnWeb.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'''
+
+      - task: PowerShell@2
+        displayName: 'Installing Frontier Scheduler Service On BAT Servers'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-09-ServiceInstallationOnBat.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'''
+
+      - task: PowerShell@2
+        displayName: 'Create Pools on F5'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/powershell/Frontier-10-UpdateF5.ps1
+
+      - task: PowerShell@2
+        displayName: 'Restarting all services'
+        inputs:
+          targetType: inline
+          script: |
+            $tenant = "$(common.tenantname)"
+            $user = "$(Admin.Username)"
+            $password = "$(ADMIN.PASSWORD)"
+            $SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+            $Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+            "$(frontier.web.servers)".split(",")  | ForEach-Object{
+            $server = "$($_.Trim()).$($env:userdnsdomain)"
+            Invoke-Command -ComputerName $server -Credential $Credentials -UseSSL -ArgumentList $tenant -ScriptBlock {
+            param($tenant)
+            $displayNames = "Frontier Tomcat ($($tenant)_Frontier)", "FrontierApplication_$($tenant)", "FrontierNaming_$($tenant)", "FrontierWF_$($tenant)", "FrontierAPI_$($tenant)"
+            foreach ($displayName in $displayNames){
+                Write-Host "Restarting $displayName on"$($env:computername)
+                Restart-Service -DisplayName $displayName -PassThru -ErrorAction SilentlyContinue
+            }
+            }
+            }
+            "$(frontier.batch.servers)".split(",")  | ForEach-Object{
+            $batServer = "$($_.Trim()).$($env:userdnsdomain)"
+            Invoke-Command -ComputerName $batServer -Credential $Credentials -UseSSL -ArgumentList $tenant -ScriptBlock {
+                param($tenant)
+                $displayName = "FrontierScheduler_$($tenant)"
+                Write-Host "Restarting $displayName on"$($env:computername)
+                Restart-Service -DisplayName $displayName -PassThru -ErrorAction SilentlyContinue
+            }
+            }
+
+      - task: CopyFiles@2
+        inputs:
+          SourceFolder: '$(Agent.TempDirectory)'
+          Contents: '**'
+          TargetFolder: '$(Build.ArtifactStagingDirectory)\AgentTempDirectory'
+        displayName: 'Copy Agent.TempDirectory to verify any temp powershell files that are executed'
+        condition: always() 
+        #condition: eq(variables['system.debug'], 'true')
+
+
+
+
