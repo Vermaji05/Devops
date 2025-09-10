@@ -1,0 +1,238 @@
+DECLARE @TenantId VARCHAR(100) = '${common.tenantname}';
+DECLARE @FrontierServicePort VARCHAR(10) = '${frontier.webservicesport}';
+DECLARE @WFHttp_ServerPort VARCHAR(10) = '${frontier.workflow.httpport}';
+
+DECLARE @FileServer VARCHAR(100) = '${common.fileserver}.${common.domain}.trintech.host';
+DECLARE @EnvDomain VARCHAR(30) = '${common.domain}';
+DECLARE @fullDomain VARCHAR(30) = '@${common.domain}.trintech.host';
+DECLARE @Env VARCHAR(10) = '${common.environment}'
+DECLARE @UserShare VARCHAR(100) = '${common.usershare}'
+DECLARE @TTW_URL VARCHAR(100)
+IF @Env = 'Prod'
+	SET @TTW_URL = 'portal.frontier.trintech.com'; 
+ELSE IF @Env = 'Test'
+	SET @TTW_URL = 'portaltest.frontier.trintech.com';
+ELSE
+	SET @TTW_URL = 'portal.lower.trintech.com';
+DECLARE @SMTPServer VARCHAR(30) = '${common.smtpserver}';
+DECLARE @SMTPServerPort VARCHAR(30) = '${common.smtpport}';
+DECLARE @Share VARCHAR(100)
+IF @Env = 'Dev'
+	SET @Share = '\Tenant Shares\';
+ELSE
+	SET @Share = '\ttw$\';
+
+DECLARE @Frontier_Process_Name VARCHAR(100) = @TenantId + '_frontier';
+
+Delete from SysConfigAttributes where attribute = 'ValidateSSOWithDSBind'; 
+INSERT INTO SysConfigAttributes VALUES (      -2, 'ValidateSSOWithDSBind',   0,   NULL,     NULL,    NULL,   '1/1/1970',   'bool',   'YES/NO - Validate SSO With DSBind');
+
+update SERVERSTARTUP set STARTUPTEXT = CONCAT('-queueServerlocalhost -svcPort', @FrontierServicePort , ' -sqlport1433') where type = 'WCFSERVER'
+
+Delete from FrontierSvcsInstance
+
+Update SysUser set Domain = @EnvDomain;
+Update SysConfigAttributes set stringvalue = CONCAT('P:', @UserShare, '\Frontier') where Attribute like 'Frontier Hosted Environment Drive Path'
+Update SysConfigAttributes set stringvalue = 'P:/Reports/' where Attribute like 'Frontier Save Grid Output Path'
+Update SysConfigAttributes set stringvalue = 'P:/Reports/' where Attribute like 'Frontier Certification Replace Path'
+Update SysConfigAttributes set stringvalue = 'P:/Reports/' where Attribute like 'Frontier Amortized Item File Path'
+Update SysConfigAttributes set StringValue = @TTW_URL where attribute like 'Server Hosts';
+Update SysConfigAttributes set StringValue = 'DIRECT' where attribute like 'Frontier File Access Method';
+Update SysConfigAttributes set ShortValue = 0 where attribute = 'Frontier Services SSL';
+Delete from SysConfigAttributes where attribute = 'Frontier Hosted Environment Domain';
+INSERT INTO SysConfigAttributes VALUES (     -2, 'Frontier Hosted Environment Domain',   NULL,   NULL,     NULL,    'cloud',   '1/1/1970',   'string',   'Current environment domain');
+Delete from serverstartup where Type = 'FILESERVICES';
+
+declare
+    @Count integer
+begin
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Workflow';
+    if( @Count = 1 )
+    begin
+		update SysConfigAttributes set Stringvalue = CONCAT('http://localhost:', @FrontierServicePort, '/Frontier/services') where Attribute = 'Frontier Web Services URL';
+		update SysConfigAttributes set Stringvalue = CONCAT('http://localhost:', @WFHttp_ServerPort, '/FrontierWF_', @TenantId) where Attribute = 'Workflow Designer Server';
+		update SysConfigAttributes set Stringvalue = CONCAT('/FrontierWF_', @TenantId) where Attribute = 'Workflow Designer Pages Server';
+		Update SysConfigAttributes set StringValue = 'TrintechWorkflow' where attribute like 'Workflow Audience';
+		Update SysConfigAttributes set StringValue = CONCAT('FrontierWF_', @TenantId) where attribute like 'Workflow DatabaseName';
+		Update SysConfigAttributes set StringValue = 'Trintech' where attribute like 'Workflow Issuer';
+		update SysConfigAttributes set StringValue = 'AA378057A7AE298240E62CC7C6CB7301BA09474591C1D37DEECF947184E15924C9DCA37BCD6DC5C847BDE161B505360C72E7DF5345180E95F9B777D0822002BBAFFC1FF992150C777ADAEE38DA389693DF4649905A043691A848556BBCDA85ED493C1757FEA669E7D0C11CA34BBC7EA06A5A7C4D4CF31BE122A4C9F8CF89709A620E4D949DC98C8743F88E6C669A4B63E3A48E96CD1BC1C38804F71469126FF247D3928E3443EB6D1AE628EBEEC870C935BC2B792372C9529E7850428C22CAE7E2C33B1A0B9E313B8C4709B7B6C3C17D9A8D6441887C06C7FABDCD939DEAA1C45BE2D1ADF294C67BB12CDF2584B3A86864EA1D410B9B9BC0B2942A4216C6FC4E415A9C4188760FEE5657985201445F3F6F9C39110919D77B5D1C8AABB6696FD544A2D7E0E21A682DB54D8A9645145836A984EEDB76ABC6E9556A83F31631334F9E4FE16F9FAF13964767774647DA00704DB6A5860984DE29B9B3AB36409FD04FD775730225139902303458F9F17A5861788C6BEA089EE1B01F1235A5BE4E4BAEFF2D172FF7182B7C20C8FC0D1CE20FCB295EEA9C9371008CE5AC2C7ADF853EA91D82C102F983CB54B19ED6A75D41862EF65727A0A29ABBF5243EDBEDD2DE048458E669A2596A5782' where Attribute = 'Workflow Public Key';
+		update SysConfigAttributes set StringValue = 'AA378057A7AE298240E62CC7C6CB730685044F4992E2F942C4C39647D5FD0021B1FAD67FCD7DCFCD47AD8A63BA07183956E7C77B452E0E95C8EA5BC1853D25839D9819EBB5482E595EA6C74BDA389693DF4654CD7B62259DE740305F8CBEC9A226206822B2B079C3C083078D56F96BA1725D315514F21EFA1E99D4C4C6B65E9017314BC388C098BC63F7837762B50D62B5E28E96CD1BC1C3E803FE47320B3B9278EDD0D81249C21562D868B3A4F914DD5AFD6A26232FD972DA793B4A9E1297BFD2AA79053C81602EDB6429B9F8DFC268CCBC786A9B4F17D1FABDCD939DEAB58C74E6AAFF9F9FFE58BC01FB1CC2A3FF640AB4386736B39BE1D6BB07675BE1FD4F377CBA169032318B054FD44623616965748E2D6D0E7DB76E5C21BFAC863D6FD544A2D7E0B7336E0B9159BC8B10357C18E5B6D29A6683E4A75001CDCC6450284EC13ECE7EC1CF17EF5A677D484CDE090E7390D8B67E9EF179C8A3B60F42B5A450AE7C575825139902303446C0FA675A4921977FFB48AFBABE043838F7E73A42ACE7282B29E663272229D0EB0C19BF6DAB7719E5E6A8294D8CE1F0375B8CC67BA037ED8578EED196729EA4D6A75D41862EDC605CB3B6B3B2F1AE80D78941E0D7AC44CCDF74EACBBF29470CDFEB147F6F135DC898CC5477BCFC70CB93DA141D691BA9E4A50E77AAD6A226B3F64E68BDD3E8CB618DD126588A1AFD0042D555798E4108A164349AEA70E36C3CE548007AB5BF5423F84AA21642315C28CD6CD1020BD45AAF0BCBBE41B76E1BD4FD1F177F74073D308F8BF412C693BBF1ECC7ED04C5542E9DB94508FF9A013398000CFBAACD0394A93ACE1BB2D98B053F1DF75A5AFE0FC762AEB0BA2FE914FD91147E36BB96A64EEFA44C78E0555995ABD07AE2EEF5BA7F46C20E603BDB4E3E2F5F96A2185ED84D377F163A4A73B0D7751F2EEBDB40A85D0A518A93FE6BB64648ADC8A4BF2750759EAE02E542307123DBE091EF57E18E9F6A702DC29A401DA6063CF26239CBBD49062A49F7C1022B1909121B61A1B26D0E0F2F604F7CAD5A84C3ED2E890022F2370C07EB37B410671D1BAB2F30C6C6A209B400A528FB5EA13F8A2EB8626A8C908AA62CF6510F06184814CA4675B18673344A6A6FD22BDE8D093031013B8DA229A39E5132467F2EFA4BC3A776AC04D3C7F5CF49A9FDD1C4B97DB177D817F8ED9469A678FA9606DA782494CBCCCBC8D973E1A5558E94A4B6E6023B4436509CF913E9E2DC941112CE1838AA4E09BB7F86A1F1AC18BA4F0391BF57E77DC7186EC198DDD04EFE41D800EB67AEB402C5E4B2BECF47407CB85475D5C3F39EFF87F2754B033A61DABFF7DF2FA31FEE37E9DEADA9266754DAE488A8F1C73D85DFD102A88370BAB04128FD110A754259AFB10D280250840EA8B79E825206C216127A2153287BA99A81F57323F3301F7E188E2208BA150C9819F75513DDE5231B51A87649044827D2976DB719FABF38ADE845676C8040C6CC6C846B300C2752BF9CEDA6DEE74AC1C9C0FD34C201CB50032A2E9F314727A18489F616EAEE0326CA58B82B32F9028D33B2A2962EAC06843FA5F932A51E54BA87036E327ACB5E64A8F18D37208F727239DA7E1181914B78FE26DB4F64E0805E4B9AFF15AEE31B4D136DCDF1D8C8F5EFF2DF63731E706AA5D4F66B4A613A106A7B9A79344BEA2DBC6B01F85AD57848B6A8D01324E2BF328F10AACE9C50C6294173EC47D97403F904C2EA722C480F3BEF801493809FAC4D1AF9960AEF34C66A6F03E14A84F623CB952C2BD1CD6D4BA304517E334BBD1A8DBCE35EA2BC0AA011F83BD92FF5649B926E29BB8C31605D9832B3B15ACFA8B0169EFDE24816CE4090657DDCE73B026601C9DE2EE1F740885D8CE8F9DB29E3EA7EE131857F4B3EADF78A985AAA6227537E4E03B590DAB6ABA4EE05FFEA7CA2EE4E4E8DD9B84146D8ACE5FD025B55FDC559FC662959AA416DD3AF67C389387B8B5AC77989510A584D60AAF377470CB7FABABD75EE853D71E0B41AF4B2653D00061916EB975F9637225432E1C6C8BF3051589C49C8BF40386C75D5BBF17795E662CC959FD36E36CA5494AE12F7347B8C887AF5BF131CCAEA769F9F23375087877DAABD1FBCD00A15B178A0F6396819BE814EA4B04C375B5D31F51AE8F3831284DC996A10284BBA76CFEAC5A914C77018869E6B12F3994CE0D6E550C5E5445820A404344E933103D17BA71BDCD403A9E1484518B7E3771EDEAE9822EA88BA8571D926557773F101CC52B6C49E971673C01F5E8755A80AB8F61337CD45A5CC0321831C79DB4F405C2516E260643F3560A92FEE87F47A55A14D60E0C802D31EB21B58828D97621FE997B4F87C0051B18145735804B837F413DA6E0B2C59EF958FAF3F78F09B15F920E635E7FB03E5BF83A7DB9CE537267DAAA2600F84CF364C0D8FA51BD692276D743A46FEBD2D33F37B548E053E1D0E5D00F706F2D27DC7ED681434C5CB05CA6BE3FF2269B40A76693EB1433DE2157E557C04B2B20A17CADACD7D348706FD92C0CB235B5EEA0E7F841D04D00415' where Attribute = 'Workflow Private Key';
+	end
+
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Use AES Field Encryption';
+    if( @Count = 0 )
+    begin
+        insert into SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+        values (-2, 'Frontier Use AES Field Encryption', 1, NULL, NULL, NULL, '01/01/1970', 'bool', 'YES/NO - Use AES Encryption');
+    end
+    else
+    begin
+        update SysConfigAttributes set StringValue = '1' where Attribute = 'Frontier Use AES Field Encryption';   
+    end
+	
+    select @Count = count(*) from SysConfigAttributes where Attribute = 'Frontier Use AES Attachment Encryption';
+    if( @Count = 0 )
+    begin
+        insert into SysConfigAttributes (ConfigID, Attribute, ShortValue, IntValue, FloatValue, StringValue, DateValue, TypeName, Description)
+        values (-2, 'Frontier Use AES Attachment Encryption', 0, NULL, NULL, NULL, '01/01/1970', 'bool', 'YES/NO - Use AES encryption for attachments');
+    end
+    else
+    begin
+        update SysConfigAttributes set ShortValue = '0' where Attribute = 'Frontier Use AES Attachment Encryption';   
+    end
+
+    select @Count = count(*) from MENUENTRY where MENUENTRYID = 10040;
+    if( @Count = 1 )
+    begin
+		Delete from MENUENTRY where MENUENTRYID = 10040;
+    end		
+end	
+
+-- Update custom reports path
+update REPORTDEFINITION set FileName = replace(FileName, substring(FileName, 1, charindex(' Root Share', FileName)) + 'Root Share\', 'P:\') where charindex(' Root Share\', FileName) > 0;
+Update SERVERSTARTUP set ProcessName = @Frontier_Process_Name;
+Update ProcessorStartup set ProcessName = @Frontier_Process_Name;
+select @Count = count(*) from SmtpServerSetup where SmtpServerSetupId = '0';
+if( @Count = 0 )
+begin
+	INSERT into SmtpServerSetup (SmtpServerSetupId, Host, ClientCertificates, DeliveryMethod, EnableSsl, PickupDirectoryLocation, Port, TargetName, Timeout, UseDefaultCredentials, UserName, UserPassword, WorkflowFromAddress)
+	values (0, @SMTPServer, '',0, 0, '', @SMTPServerPort, '', -1, 1, '', '', @TenantID + '@frontier.trintech.com');
+end
+else
+begin
+	Update SmtpServerSetup set host = @SMTPServer where SmtpServerSetupId = 0;
+	Update SmtpServerSetup set port = @SMTPServerPort where SmtpServerSetupId = 0;
+	Update SmtpServerSetup set WorkflowFromAddress= @TenantID + '@mail.frontier.trintech.com' where SmtpServerSetupId = 0;
+end
+Update EmailConfig set FromAddress = @TenantID + '@frontier.trintech.com'
+
+Update Sysuser set SSOID = 'Svc_' + @TenantId + @fullDomain where name = 'RecAdmin';
+
+-- Update Sysuser and set ssoid with test in the name if this is test db
+IF (@TenantId like '%test')
+begin
+	update SysUser set ssoid = replace(ssoid, substring(@TenantId, 1, len(@TenantId) - 4) + '.com', @TenantId + '.com') where ssoid like '%@' + substring(@TenantId, 1, len(@TenantId) - 4) + '.com'
+	update SysUser set ssoid = replace(ssoid, substring(@TenantId, 1, len(@TenantId) - 4) + '.org', @TenantId + '.org') where ssoid like '%@' + substring(@TenantId, 1, len(@TenantId) - 4) + '.org'
+end
+	
+-- Create Fron.admin and trintech.support accounts
+begin
+
+	declare @userid int
+	declare @usergrpid int
+	declare @cnt int
+	declare @userssoid varchar(250)
+	declare @userName varchar(10)
+
+
+
+
+	if exists (select top 1 * from usergroup where creatorid = -1)
+	begin
+	
+		begin transaction
+		begin try
+
+			select @userid = NextId from AvailableIds2 where TableName = 'SysUser'
+			select @usergrpid = Id from UserGroup where creatorid = -1
+
+			set @userssoid = 'fron.admin@' + @TenantId + '.com'
+			set @userName = 'FronAdmin';
+			select @cnt=count(*) from SysUser where ssoId = @userssoid or name = @userName
+			if (@cnt = 0)
+			begin
+				print 'Creating user: ' + @userssoid
+				set @userid = @userid + 1
+
+				insert into SysUser (Id,   Name,      Password, FullName,  PwdLastChanged, PwdLife, Status,     LastLogOnDate, StatusLastChangedDate, CreatorId, Domain, SSOId, CMUser, CMPrefix)
+				values (       @userid, @userName, '', 'Fron Admin', getdate(),       0,      1,          getdate(),       getdate(),             14,    @EnvDomain, @userssoid, 0, 0) 
+
+				insert into UserMap_Ver0 values (@userid, @usergrpid, -1, -1, -1, 1, 16, 0, 99)
+				
+				set @userid = @userid + 1
+
+				update AvailableIds2 set NextId = @userid + 1 where TableName = 'SysUser'
+				print 'Created user: ' + @userssoid
+			end 
+			else
+				  print 'User already exists. SSOId = ' + @userssoid + ', Name = ' + @userName
+
+			set @userName = 'TRSupport';
+			select @cnt=count(*) from SysUser where ssoId = @userssoid or name = @userName
+			set @userssoid = 'trintech.support@' + @TenantId + '.com'
+
+			select @cnt=count(*) from SysUser where ssoId = @userssoid
+			if (@cnt = 0)
+			begin
+				set @userid = @userid + 1
+				print 'Creating user: ' + @userssoid
+				insert into SysUser (Id,   Name,      Password, FullName,  PwdLastChanged, PwdLife, Status,     LastLogOnDate, StatusLastChangedDate, CreatorId, Domain, SSOId, CMUser, CMPrefix)
+				values (       @userid, @userName, '', 'Trintech Support', getdate(),       0,      1,          getdate(),       getdate(),             14,    @EnvDomain, @userssoid, 0, 0) 
+
+				insert into UserMap_Ver0 values (@userid, @usergrpid, -1, -1, -1, 1, 16, 0, 99)
+				
+				set @userid = @userid + 1
+
+				update AvailableIds2 set NextId = @userid + 1 where TableName = 'SysUser'
+				print 'Created user: ' + @userssoid
+			end
+			else
+			   print 'User already exists. SSOId = ' + @userssoid + ', Name = ' + @userName
+
+			end try
+			begin catch
+				SELECT  
+					ERROR_NUMBER() AS ErrorNumber 
+					,ERROR_SEVERITY() AS ErrorSeverity 
+					,ERROR_STATE() AS ErrorState 
+					,ERROR_PROCEDURE() AS ErrorProcedure 
+					,ERROR_LINE() AS ErrorLine 
+					,ERROR_MESSAGE() AS ErrorMessage; 
+
+				 IF @@TRANCOUNT > 0 
+				  begin
+					print 'error'
+					ROLLBACK TRANSACTION; 
+					end
+		END CATCH; 
+	end
+	IF @@TRANCOUNT > 0 
+	begin
+		print 'commited'
+		COMMIT TRANSACTION; 
+	end
+end
+
+GO
+
+--delete from UserConfig where IsDefault = 1 and Section = 'AutoMatch' and ProfileKey = 'LogFileName';
+--insert into UserConfig(Section, ProfileKey, Entry, IsDefault, IsOverride) values ('AutoMatch', 'LogFileName', 'P:\Processing Results\matchlog.txt', 1, 0);
+--Go
+
+Update METADATA set DEFAULTFUNCTION = '=P:\Processing Results\matchlog.txt' where BUSINESSOBJECT = 'AUTOMATCHJOB' and ELEMENTNAME = 'FILEPATH';
+Go
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+declare @Count integer
+SELECT @Count = count(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = N'Tracker';
+IF ( @Count = 0 )
+BEGIN          
+	CREATE TABLE [dbo].[Tracker](
+		[TrackerId] [int] IDENTITY(1,1) NOT NULL,
+		[AttachmentId] [int] NULL,
+		[EncryptedAttachmentId] [int] NULL,
+		[TableName] [varchar](255) NULL,
+		[ColumnName] [varchar](255) NULL,
+		[RowId] [bigint] NULL,
+		[SnapshotId] [int] NULL,
+	CONSTRAINT [PK_Tracker] PRIMARY KEY CLUSTERED 
+	(
+		[TrackerId] ASC
+	)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 80, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+	) ON [PRIMARY];
+END
+GO
+
+

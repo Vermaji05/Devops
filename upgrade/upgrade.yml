@@ -1,0 +1,166 @@
+name: "$(Build.DefinitionName)-${{ parameters.PODId }}-${{ parameters.InputEnvironment }}-v${{ parameters.Version }}-$(Date:yyyyMMdd)-"
+trigger: none
+parameters:
+  - name: PoolName
+    type: string
+    default: "USR2_Frontier_Lower"
+    displayName: Release agent pool
+    values:
+      - USR2_Frontier_Lower
+      # - USR1_Frontier_Cloud
+      # - USR2_Frontier_Cloud
+  - name: InputEnvironment
+    type: string
+    default: "Dev"
+    values:
+      # - Test
+      # - Prod
+      - Dev
+  - name: PODId
+    type: string
+    values:
+      - "01"
+      - "02"
+      - "03"
+      - "04"
+      - "05"
+      - "06"
+      - "07"
+      - "08"
+      - "09"
+      - "10"
+      - "11"
+      - "12"
+      - "13"
+      - "18"
+  - name: Version
+    type: string
+    values:
+      - "2024.2.1"
+
+variables:
+  - name: KeyVault
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'TrintechITKeyVault'
+    ${{ if or(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.PoolName, 'USR2_Frontier_Cloud')) }}: 
+      value: 'CICD-Secrets'
+  - name: keyVaultParameters
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'Lower-KeyvaultParameters'
+    ${{ if or(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.PoolName, 'USR2_Frontier_Cloud')) }}: 
+      value: 'Cloud-KeyvaultParameters'
+  - name: springConfigServerUrl
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'http://10.72.73.33:8888'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'http://10.71.73.48:8888'   
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'http://10.72.169.36:8888'
+  - name: region
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+      value: 'USR2'
+    ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+      value: 'USR2'
+    ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+      value: 'USR1'
+  - name: envprefix
+    ${{ if eq(parameters.InputEnvironment, 'Dev') }}:
+      value: 'LF'
+    ${{ if eq(parameters.InputEnvironment, 'Prod') }}:
+      value: 'CF'
+    ${{ if eq(parameters.InputEnvironment, 'Test') }}:
+      value: 'CF'
+  # - name: cmdbserver
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+  #     value: 'USR2LFSSQM-ZZ01'
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+  #     value: 'USR2CFSSQF-ZZ01'
+  #   ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+  #     value: 'USR1CFSSQF-ZZ01'
+  # - name: fileserver
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+  #     value: 'USR2LFDSSH-ZZ01'
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+  #     value: 'USR2CFTDFS-ZZ00'
+  #   ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+  #     value: 'USR1CFTDFS-ZZ00'
+  # - name: dfsserver
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+  #     value: 'USR2LFDSSH-ZZ01'
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+  #     value: 'USR2CFTDFS-ZZ01'
+  #   ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+  #     value: 'USR1CFTDFS-ZZ01'
+  # - name: portaldbserver
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Lower') }}:
+  #     value: 'USR2LFSSQM-ZZ01'
+  #   ${{ if eq(parameters.PoolName, 'USR2_Frontier_Cloud') }}:
+  #     value: 'USR2CFSSQF-ZZ02'
+  #   ${{ if eq(parameters.PoolName, 'USR1_Frontier_Cloud') }}:
+  #     value: 'USR1CFSSQF-ZZ02'
+  # - name: appservers
+  #   ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+  #     value: "usr2lftapp-0101,usr2lftapp-0201"
+  #   ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+  #     value: "usr2cftapp-0101,usr2cftapp-0201"
+  #   ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+  #     value: "usr1cftapp-zz01,usr1cftapp-zz02,usr1cftapp-zz03,usr1cftapp-zz04,usr1cftapp-zz05"
+  # - name: sftphost
+  #   ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Lower'), eq(parameters.InputEnvironment, 'Dev')) }}:
+  #     value: "USR2LMDSSH-F001"
+  #   ${{ if and(eq(parameters.PoolName, 'USR2_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Test')) }}:
+  #     value: "USR2CMDSSH-F001"
+  #   ${{ if and(eq(parameters.PoolName, 'USR1_Frontier_Cloud'), eq(parameters.InputEnvironment, 'Prod')) }}:
+  #     value: "USR1CFDSSH-F001"
+
+jobs:
+  - job: all
+    pool: ${{ parameters.PoolName }}
+    variables:
+      - group: ${{ variables.keyVaultParameters }}
+      - name: KV
+        value: ${{ variables.KeyVault }}
+    steps:
+      - powershell: |
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ variables.springConfigServerUrl }} --Name frontier --Env templates  --Label main --Username user  --Password password  --VaultName ${{ variables.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+        displayName: Read variables from ${{variables.springConfigServerUrl}} 
+      - task: UniversalPackages@0
+        displayName: Download Frontier Build Package
+        inputs:
+          command: 'download'
+          downloadDirectory: '$(System.DefaultWorkingDirectory)\Artifact'
+          feedsToUse: 'internal'
+          vstsFeed: 'Frontier/frontier'
+          vstsFeedPackage: 'hosted-installs'
+          vstsPackageVersion: '${{ parameters.Version }}'
+          verbosity: 'Debug'
+      - task: PowerShell@2
+        displayName: 'Stopping all services on ${{ parameters.PODId }}'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Stop-Service.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''
+      - task: PowerShell@2
+        displayName: 'Creating database backup and snapshot'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/DBBackup.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''
+      - task: PowerShell@2
+        displayName: 'Creating Backup of binaries and download new version'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Copy-Binaries.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'' -location $(System.DefaultWorkingDirectory)\Artifact -version ''${{ parameters.Version }}'''
+      # - task: PowerShell@2
+      #   displayName: 'Running Pre-requisites for new version'
+      #   inputs:
+      #     targetType: filePath
+      #     filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Run-PreReqs.ps1
+      #     arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''
+      - task: PowerShell@2
+        displayName: 'Starting all services on ${{ parameters.PODId }}'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/upgrade/powershell/Start-Service.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ variables.region }} -envprefix ${{ variables.envprefix }} -env ${{ parameters.InputEnvironment }} -PodId ''${{ parameters.PODId }}'''

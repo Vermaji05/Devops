@@ -1,0 +1,193 @@
+Param(
+    [Parameter(Mandatory=$true)]
+    [string[]]
+    $user,
+    [Parameter(Mandatory=$true)]
+    [string[]]
+    $password,
+    [Parameter(Mandatory=$false)]
+    [string]
+    $dfsserver,
+    $SFTPServer
+)
+
+#import shared functions
+$ScriptDirectory = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+try {
+    write-host "$ScriptDirectory\shared_functions.ps1"
+    . ("$ScriptDirectory\shared_functions.ps1")
+    
+}catch{
+    write-host "Import of shared_functions.ps1 failed!"
+}
+
+#check if password secret exists
+$secretname = "${Common.tenantname}-Configinfo-SFTPAccountPassword"
+$secret = GetSecret "$secretname"
+
+if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+    #generate new password
+    SetSecret "$secretname" "$(GeneratePassword)"
+    $secret = GetSecret "$secretname"
+}else{
+    write-host "Secret found!"
+}
+
+$SecurePassword = $password | ConvertTo-SecureString -AsPlainText -Force
+$Credentials = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+
+if('${common.environment}' -eq 'Dev'){
+$sftpSharePath = "\\$dfsserver\d$\TenantShares"
+$fullSharePath = $sftpSharePath + "\${Common.tenantname}"
+}else{
+$sftpSharePath = "\\$dfsserver\d$\Shares\SFTP01"
+$fullSharePath = $sftpSharePath + "\${Common.tenantname}"
+}
+Write-Host "SFTP Share Path: $sftpSharePath"
+if(!$(Test-Path $fullSharePath))
+{
+    mkdir $fullSharePath
+}
+
+$serverName = $($fullSharePath -split "\\")[2]
+$DFSRootServer = $($serverName -split "-")[0] + "-ZZ00.$($env:userdnsdomain)"
+$SFTPServer = $SFTPServer + ".$($env:userdnsdomain)"
+
+Write-Host "DFS Root Server: $DFSRootServer"
+
+if('${common.environment}' -ne 'Dev'){
+Invoke-Command -ComputerName $DFSRootServer -Authentication Default -Credential $Credentials -UseSSL -ArgumentList @($secret) -ScriptBlock {
+    Start-ScheduledTask "DFSMounts" -ErrorAction Ignore
+}}
+
+Invoke-Command -ComputerName $SFTPServer -Authentication Credssp -Credential $Credentials -UseSSL -ArgumentList @($secret,$DFSRootServer,$SFTPServer)  -ScriptBlock {
+param($secret,$DFSRootServer,$SFTPServer)
+
+    $companyname = "${Common.tenantname}"
+    if($companyname -like '*test'){
+        $companyname = $companyname -replace 'test',''
+    }
+    if('${common.environment}' -eq 'Dev'){
+    $foldername = "/${Common.tenantname}/User"
+    }else{
+    $foldername = "/${Common.tenantname}/User"
+    }
+    if($DFSRootServer -like 'AUA*'){
+        $hostname = "auasftp.cadency.trintech.com"
+    }else{
+    $hostname = "$SFTPServer"
+    }
+    $possibleLocation = @("D:\Apps\Ipswitch\WS_FTP Server\WS_FTP Server","D:\WSFTP_Server\WS_FTP Server\","D:\apps\ipswitch\WS_FTP Server","D:\apps\WS_FTP Server\WS_FTP Server","D:\apps\Progress\WS_FTP Server\WS_FTP Server")
+
+    $location = ''
+    $possibleLocation | foreach {
+
+        if ([System.IO.Directory]::Exists($_) -and $location -eq '')
+        {
+            $location = $_
+        }
+    }
+
+    cd $location
+
+    $users = @()
+    
+    $response = ".\iftpaddu.exe -list -h $hostname" | Invoke-Expression
+    $response | foreach {
+        $line = $_
+        
+        $userHash = @{}
+        $items = $($line.replace(" -p ***hidden for security***","").split(" "))
+        
+        foreach ($item in $items) {
+            $Key = $item
+            [void] $foreach.MoveNext() 
+            $Value = $foreach.Current
+            $userHash.Add($Key, $Value)
+        }
+        $users += $userHash
+    }
+
+    $allusers = @()
+    $users | foreach {
+        $allusers += $_["-u"]
+    }
+
+    if ($allusers | Where {$_ -eq $companyname})
+    {
+        Write-Host "User already exists."
+    }else{
+
+        if (!$(Get-Module SqlServer))
+    {
+        Install-Module SqlServer -Force
+    }
+
+    $key = Get-ItemProperty -Path HKLM:\SOFTWARE\WOW6432Node\Ipswitch\iFtpSvc\Setup -Name SQLServerName
+
+    $folderId = $(Invoke-Sqlcmd -ServerInstance $key.SQLServerName -Database "ws_ftp_server" -TrustServerCertificate -Query "SELECT FolderID FROM Host_Folders Where Relative_Path = '$foldername'").FolderID
+
+    if ($folderId -ne "" -and $folderId -ne $NULL)
+    {
+        Write-Host "$foldername virtual folder already exist."
+    }else{
+        Write-Host "Creating $foldername virtual folder."
+        $insertQuery = "INSERT INTO Host_Folders (
+                Folder_Path,
+                Virtual_Folder,
+                Require_40bitSSL,
+                Require_128bitSSL,
+                Use_Host_Cleanup_Defaults,
+                File_Cleanup_Option,
+                File_Cleanup_Days,
+                Empty_Sub_Cleanup_Option,
+                Empty_Sub_Cleanup_Days,
+                HostID,
+                Use_File_Create_Time,
+                Relative_Path
+            ) 
+        
+        VALUES (
+                '',
+                '0',
+                '0',
+                '0',
+                1,
+                0,
+                30,
+                0,
+                30,
+                1,
+                1,
+                '$foldername'
+            )"
+        $insertQuery
+        Invoke-Sqlcmd -ServerInstance $key.SQLServerName -Database "ws_ftp_server" -TrustServerCertificate -Query $insertQuery
+    }
+
+        $response = '.\iftpaddu.exe -u $companyname -h $hostname -n $companyname -p $secret -o "$foldername" +chgpass +lock' | Invoke-Expression
+        $response
+        $query = "SELECT UserID FROM Host_Users WHERE User_LoginID = '$companyname'"
+        $userID = $(Invoke-Sqlcmd -ServerInstance $key.SQLServerName -Database "ws_ftp_server" -TrustServerCertificate -Query $query).UserID
+        $folderId = $(Invoke-Sqlcmd -ServerInstance $key.SQLServerName -Database "ws_ftp_server" -TrustServerCertificate -Query "SELECT FolderID FROM Host_Folders Where Relative_Path = '$foldername'").FolderID
+        $permissionsInsertQuery = "INSERT INTO Folder_Permissions (
+            File_Mask,
+            FolderID,
+            FolderUserTypeSpec,
+            Permission_Type,
+            Permit_Delete,
+            Permit_Folder_Create,
+            Permit_List,
+            Permit_Read,
+            Permit_Rename,
+            Permit_Write,
+            Propagate,
+            UserID)
+            VALUES (
+                '*',$folderId,0,0,1,1,1,1,1,1,1,$userID
+            )
+        "
+        #Write-Host $permissionsInsertQuery
+        Invoke-Sqlcmd -ServerInstance $key.SQLServerName -Database "ws_ftp_server" -TrustServerCertificate -Query $permissionsInsertQuery
+    }
+}

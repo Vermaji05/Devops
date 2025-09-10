@@ -1,0 +1,105 @@
+parameters:
+  - name: allvariables
+    type: object
+  - name: allparameters
+    type: object
+    
+jobs:
+  - job: all
+    pool: ${{ parameters.allparameters.PoolName }}
+    variables:
+      - group: ${{ parameters.allparameters.keyVaultParameters }}
+      - name: KV
+        value: ${{ parameters.allparameters.KeyVault }}
+    steps:
+      - checkout: SiteSetup
+      - script: |
+          d:/apps/spring_cloud_pipeline_client/bin/SpringCloudPipelineClient.exe --Dir  $(System.DefaultWorkingDirectory) --Uri ${{ parameters.allvariables.springConfigServerUrl }} --Name frontier --Env ${{ parameters.allparameters.InputCustomerName }}  --Label ${{ parameters.allparameters.configBranch }} --Username user  --Password password  --VaultName ${{ parameters.allparameters.KeyVault }} --TenantId a6990654-25eb-4d90-9f25-a558d2bf582f  --ClientId  $(KeyVault.ClientId)  --ClientSecret $(KeyVault.ClientSecret) --Envvariables Common.* --Verbose
+        displayName: 'Apply Configuration Files to Remote servers' 
+
+      - task: PowerShell@2
+        displayName: 'Updating CMDB Entries'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/SiteSetup/powershell/Frontier-01-CMDBUpdate.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ parameters.allvariables.region }} -envprefix ${{ parameters.allvariables.envprefix }} -env ${{ parameters.allparameters.InputEnvironment }} -PodId ''${{ parameters.allparameters.PODId }}'' -cmdbserver ${{ parameters.allvariables.cmdbserver }}'
+
+      - checkout: git://Frontier\spring-cloud-deploy-config@${{ parameters.allparameters.configBranch }}
+        path: temp_branch
+
+      - task: PowerShell@2
+        displayName: 'Updating existing tenants in spring config repo'
+        inputs:
+          targetType: filePath
+          filePath: $(System.DefaultWorkingDirectory)/SiteSetup/powershell/Frontier-02-ConfigFilesReader.ps1
+          arguments: '-user $(Admin.Username) -password ''$(Admin.Password)'' -region ${{ parameters.allvariables.region }} -envprefix ${{ parameters.allvariables.envprefix }} -env ${{ parameters.allparameters.InputEnvironment }} -PodId ''${{ parameters.allparameters.PODId }}'' -configLocation $(Pipeline.Workspace)/temp_branch/ -portaldbserver ${{ parameters.allvariables.portaldbserver }} -workspacedb ${{ parameters.allvariables.workspacedb }} -SMTPPort ${{ parameters.allvariables.SMTPPort }} -lb1 ''${{ parameters.allvariables.lb1 }}'' -lb2 ''${{ parameters.allvariables.lb2 }}'''
+
+      - powershell: |
+          Set-Location -Path "$(Pipeline.Workspace)/temp_branch/"
+          ${{ parameters.allvariables.git }} checkout -b temp_branch
+        displayName: Create a new branch
+
+      - powershell: |
+          Set-Location -Path "$(Pipeline.Workspace)/temp_branch"
+          ${{ parameters.allvariables.git }} add .
+          ${{ parameters.allvariables.git }} commit -m "updating temp_branch"
+          ${{ parameters.allvariables.git }} push -u  https://$(SP_TOKEN)@trintech-coe.visualstudio.com/Frontier/_git/spring-cloud-deploy-config temp_branch
+        displayName: git push
+
+      - powershell: |
+            $extension = az extension list
+            $extensions = ConvertFrom-JSON $($extension -join '')
+            if ($extensions | Where {$_.name -eq 'azure-devops'})
+            {}else{
+                az extension add --name azure-devops
+            }
+            $org = "https://trintech-coe.visualstudio.com/"
+            $project = "Frontier"
+            $repo = "spring-cloud-deploy-config"
+            $pr_id = az repos pr create -r spring-cloud-deploy-config -s temp_branch -t ${{ parameters.allparameters.configBranch }} -d true --org $org -p $project --query pullRequestId --bypass-policy true --bypass-policy-reason "AZ DevOps Auto-Approve"
+            if ($pr_id -is [String])
+            {
+                Write-Host Please Approve Pull Request
+                Write-Host "##vso[task.setvariable variable=pr_id;]$($pr_id)"
+                Write-Host https://dev.azure.com/trintech-coe/$project/_git/$repo/pullrequest/$pr_id
+            }
+            else {  
+                throw("Pull-Request is not created")
+            }
+
+        displayName: Create PR
+        env:
+          AZURE_DEVOPS_EXT_PAT: $(SP_TOKEN)
+
+      - powershell: |
+            $extension = az extension list
+            $extensions = ConvertFrom-JSON $($extension -join '')
+            if ($extensions | Where {$_.name -eq 'azure-devops'})
+            {}else{
+                az extension add --name azure-devops
+            }
+            $org = "https://trintech-coe.visualstudio.com/"
+            $project = "Frontier"
+            $repo = "spring-cloud-deploy-config"
+
+            az devops configure --defaults organization=$org
+            az repos pr set-vote --id $env:pr_id --vote approve
+            az repos pr update --id $env:pr_id --status completed --delete-source-branch true
+        displayName: Approve PR        
+        env:
+          AZURE_DEVOPS_EXT_PAT: $(SP_TOKEN)
+      
+      - powershell: |
+          ${{ parameters.allvariables.git }} push -u https://${env:SP_TOKEN}@trintech-coe.visualstudio.com/Frontier/_git/spring-cloud-deploy-config  --delete temp_branch
+        workingDirectory: "$(Pipeline.Workspace)/temp_branch"
+        condition: always()
+        continueOnError: true 
+        displayName: Deleting existing temp branch
+
+      - powershell: |
+          Start-Sleep -s 5
+          Remove-Item -LiteralPath "temp_branch" -Force -Recurse
+        displayName: Cleanup
+        workingDirectory: "$(Pipeline.Workspace)"
+        continueOnError: true
+        condition: always()

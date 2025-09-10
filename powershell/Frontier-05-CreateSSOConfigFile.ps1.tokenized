@@ -1,0 +1,47 @@
+param($adminbox)
+$ScriptDirectory = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+try {
+    write-host "$ScriptDirectory\shared_functions.ps1"
+    . ("$ScriptDirectory\shared_functions.ps1")
+    
+}catch{
+    write-host "Import of shared_functions.ps1 failed!"
+}
+#Check if password has been created for Frontier sql account and generate an encrypted one if it hasn't been
+$secretname = "${common.tenantname}-configinfo-frontierdbpwd"
+$secret = GetSecret $secretname
+
+Set-Location d:\jdk17.0.10_7\bin\
+if ($secret -eq $null -or $secret -eq '' -or $secret -eq 1){
+    #secret doesn't exist - check if default exists
+    $frontierDBPwd = $(GeneratePassword)
+    $frontierDBPwdEnc = ./java.exe FrontierEnc $frontierDBPwd
+    SetSecret "$secretname" "$frontierDBPwdEnc"
+    write-host "Secret $secretname added!"
+}elseif ($secret -eq -1){
+    write-host "Error in GetSecret"
+}else{
+    write-host "Secret found!"
+    $frontierDBPwdEnc =  $secret
+    $frontierDBPwd = ./java.exe FrontierEnc dec $frontierDBPwdEnc
+}
+
+$ssoFile = "${common.configurations}\public\ssoconfig.cfu"
+if(!(Test-Path $ssoFile)){
+Write-Host 'Creating SSOConfig.cfu file for ${common.tenantname}'
+Copy-Item "\\$adminbox\d$\Frontier\SSOCFU\template.cfu" $ssoFile
+#Load dll files
+$folder = "D:\apps\frontier_encryption\Rpswin"
+[void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes("$folder\BouncyCastle.Crypto.dll"))
+[void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes("$folder\CommonSvcsNet.dll"))
+
+#read sso file
+$content = Get-Content $ssoFile
+
+#Second line of the file
+$oldvalue = $content[1]
+
+[CommonSvcsNet.FrCrHelper]::DString($oldvalue,2)
+$newvalue = [CommonSvcsNet.FrCrHelper]::EString("${frontier.dbname},${frontier.dbuser},$frontierDBPwd",2)
+$content -replace $oldvalue, $newvalue | set-content $ssoFile
+}
